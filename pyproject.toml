@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "enedis-crisis-dispatch"
+version = "0.1.0"
+description = "Real-time decision support for dispatching field teams during climate crises (Défi Enedis, Hackathon La Mêlée 2026)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+app = ["streamlit>=1.38", "pydeck>=0.9"]
+llm = ["anthropic"]
+bench = ["ortools>=9.10", "matplotlib>=3.8"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+all = ["enedis-crisis-dispatch[app,llm,bench,dev]"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"

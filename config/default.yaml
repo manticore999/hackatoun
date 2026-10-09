@@ -1,0 +1,46 @@
+# Every business rule and weight lives here, never hard-coded in the engine.
+# See docs/RO_ENGINE_BRIEF.md §3-§4 for the meaning of each parameter.
+
+data:
+  raw_dir: data/raw
+  postes: poste_v2.csv
+  incidents: coupures_v2_100_crises.csv
+  sites: agents_v2.csv
+  communes: insee_v2.csv
+
+objective:
+  beta_sensitive: 3.0        # w_i = customers * (1 + beta * sensitive)
+  lambda_stability: 50.0     # per team whose NEXT job changes vs last recommendation
+  lambda_travel: 1.0         # per hour of travel (tie-breaker)
+  lambda_fairness: 0.0       # * max outage time over incidents
+
+work_rules:
+  shift_h: 12
+  rest_h: 11
+  travel_counts_as_work: true
+  allow_split: false          # a job may not cross the end of a shift
+  rest_at: site               # site | base
+  rest_starts: when_job_does_not_fit   # when_job_does_not_fit | at_shift_end
+  teams_per_incident: 1
+  sensitive_deadline_h: null
+
+travel:
+  detour_factor: 1.3
+  speed_kmh: 50
+  zone_factors: {}            # e.g. {"Ariège-montagne": 1.5}
+
+solver:
+  budget_ms: 300
+  seed: 42
+  alns_destroy_fraction: 0.15
+
+simulation:
+  speed: 60                   # 1 = real time, 60 = one simulated minute per second
+  group_events_s: 1.0
+  duration_noise: 0.0         # 0 = actual duration equals estimate
+
+llm:
+  provider: anthropic
+  model: claude-opus-5-5
+  effort: medium
+  max_tokens: 16000
