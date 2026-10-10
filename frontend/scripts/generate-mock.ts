@@ -18,7 +18,7 @@ const CRISIS = process.env.CRISIS ?? 'CRISE_027';
 const STEP_MINUTES = 30;
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const dataDir = join(root, '..', 'data', 'raw');   // shared with the backend
+const dataDir = join(root, '..', 'backend', 'data', 'raw');   // shared with the backend
 const outDir = join(root, 'public', 'mock', CRISIS.toLowerCase());
 const files = {
   postes: join(dataDir, 'poste_v2.csv'),

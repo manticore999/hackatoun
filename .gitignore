@@ -10,12 +10,12 @@ build/
 dist/
 
 # Secrets
+backend/.env
 .env
-.streamlit/secrets.toml
 
 # Local tools and outputs
-tools/*.jar
-bench/results/
+tools/
+backend/bench/results/
 logs/
 *.log
 
@@ -26,5 +26,5 @@ Thumbs.db
 .idea/
 
 # Knowledge base of decisions (local)
-data/*.sqlite
-data/cache/
+backend/data/*.sqlite
+backend/data/cache/
