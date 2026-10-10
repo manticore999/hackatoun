@@ -41,14 +41,28 @@ def load_sites(cfg) -> list[Site]:
             for r in df.itertuples()]
 
 
-def load_teams(cfg, sites: list[Site] | None = None) -> list[Team]:
-    """One Team per unit of nb_equipes, all starting at their site at t0 (MVP: everyone mobilised at 0)."""
+def load_teams(cfg, sites: list[Site] | None = None, roster: dict[str, int] | None = None,
+               b_offset_h: float | None = None, relief: dict[str, int] | None = None,
+               c_offset_h: float | None = None) -> list[Team]:
+    """One Team per unit of nb_equipes, at its site. Shift schedule (stage 1, fixed at initialisation), per site:
+    the first `roster[site]` teams are group B (start at H0 + b_offset_h), the next `relief[site]` teams are group C,
+    the relief (start at H0 + c_offset_h, so that some teams are always on duty), the others are group A (H0)."""
     sites = sites or load_sites(cfg)
+    r = cfg.roster
+    roster = dict(vars(r.b_per_site)) if roster is None else roster
+    b = r.b_offset_h if b_offset_h is None else b_offset_h
+    relief = (dict(vars(r.c_per_site)) if getattr(r, "c_per_site", None) else {}) if relief is None else relief
+    c = getattr(r, "c_offset_h", 12.0) if c_offset_h is None else c_offset_h
     teams = []
     for s in sites:
+        n_b = roster.get(s.id, 0)
+        n_c = relief.get(s.id, 0)
+        if n_b + n_c > s.n_teams:
+            raise ValueError(f"roster for {s.id}: {n_b} B + {n_c} C teams > {s.n_teams} teams")
         for k in range(s.n_teams):
+            start = float(b) if k < n_b else float(c) if k < n_b + n_c else 0.0
             teams.append(Team(id=f"{s.id}_E{k + 1}", home_site=s.id, lat=s.lat, lon=s.lon,
-                              free_at=0.0, shift_start=0.0, shift_end=float(cfg.work_rules.shift_h)))
+                              free_at=start, shift_start=start))
     return teams
 
 

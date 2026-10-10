@@ -1,4 +1,4 @@
-"""Load config/default.yaml into attribute-access objects (cfg.work_rules.shift_h)."""
+"""Load config/default.yaml into attribute-access objects (cfg.roster.work_h)."""
 from __future__ import annotations
 
 from pathlib import Path

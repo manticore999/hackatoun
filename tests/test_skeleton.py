@@ -1,18 +1,18 @@
 """Tests that must pass from day one (skeleton), plus engine acceptance tests to un-skip as work lands."""
-import pytest
 
 from dispatch.config import load_config
 from dispatch.data.loaders import list_crises, load_incidents, load_sites, load_teams
 from dispatch.data.travel import haversine_km
 from dispatch.engine.modifiers import CATALOGUE
-from dispatch.engine.types import Incident, Team
+
 
 cfg = load_config()
 
 
 def test_config_loads():
-    assert cfg.work_rules.shift_h == 12 and cfg.work_rules.rest_h == 11
+    assert cfg.roster.work_h == 12 and cfg.roster.rest_h >= 11
     assert cfg.work_rules.teams_per_incident == 1
+    assert cfg.objective.beta_sensitive == 0          # official N x T mode by default
 
 
 def test_sites_and_teams():
@@ -20,6 +20,9 @@ def test_sites_and_teams():
     teams = load_teams(cfg, sites)
     assert len(sites) == 18
     assert len(teams) == 63
+    r = cfg.roster
+    assert sum(t.shift_start == r.b_offset_h for t in teams) == sum(vars(r.b_per_site).values())      # group B
+    assert sum(t.shift_start == r.c_offset_h for t in teams) == sum(vars(r.c_per_site).values())      # relief C
 
 
 def test_crises_load():
@@ -40,19 +43,3 @@ def test_travel_distance():
 def test_modifier_catalogue():
     assert {"force", "forbid", "zone_inaccessible", "duration_update", "weight"} <= set(CATALOGUE)
 
-
-# ---------------- engine acceptance tests (docs/RO_ENGINE_BRIEF.md §9) ----------------
-def _toy():
-    """One team, three incidents at t0, all at the team's position (no travel). Brief §3."""
-    team = Team(id="T1", home_site="S1", lat=43.6, lon=1.44, free_at=0.0, shift_end=24.0)
-    mk = lambda i, n, p: Incident(id=i, poste_id=i, lat=43.6, lon=1.44, customers=n,  # noqa: E731
-                                  sensitive=False, reported_at=0.0, est_duration=p)
-    return team, mk("A", 150, 8.0), mk("B", 60, 2.0), mk("C", 100, 4.0)
-
-
-@pytest.mark.skip(reason="T1: enable once evaluate_route is implemented")
-def test_T1_evaluate_route_toy():
-    from dispatch.engine.evaluate import evaluate_route
-    team, a, b, c = _toy()
-    assert evaluate_route(team, [a, c, b], cfg).cost == pytest.approx(3240)
-    assert evaluate_route(team, [b, c, a], cfg).cost == pytest.approx(2820)

@@ -86,3 +86,16 @@ CATALOGUE: dict[str, type[Modifier]] = {
     "reserve": Reserve,
     "weight": Weight,
 }
+TYPE_OF = {cls: name for name, cls in CATALOGUE.items()}
+
+
+def to_dict(m: Modifier) -> dict:
+    from dataclasses import asdict
+    return {"type": TYPE_OF[type(m)], **asdict(m)}
+
+
+def from_dict(d: dict) -> Modifier:
+    """Build a modifier from {"type": ..., fields...}. Raises KeyError / TypeError on unknown type or field."""
+    d = dict(d)
+    cls = CATALOGUE[d.pop("type")]
+    return cls(**d)

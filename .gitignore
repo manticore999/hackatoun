@@ -24,3 +24,7 @@ logs/
 Thumbs.db
 .vscode/
 .idea/
+
+# Knowledge base of decisions (local)
+data/*.sqlite
+data/cache/

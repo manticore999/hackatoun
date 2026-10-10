@@ -34,6 +34,8 @@ class Incident:
     departement: str = ""
     accessible_from: float = 0.0    # set by modifiers ("zone flooded until 18h")
     teams_required: int = 1         # C1, the MVP supports 1
+    priority: float = 1.0           # weight multiplier set by modifiers
+    travel_factor: float = 1.0      # travel-time multiplier into this incident (modifiers)
 
 
 @dataclass
@@ -42,9 +44,8 @@ class Team:
     home_site: str
     lat: float                      # position when it becomes free
     lon: float
-    free_at: float                  # now if idle, else end of current job / rest
-    shift_start: float = 0.0        # mobilisation time (staggered shifts)
-    shift_end: float = 12.0         # end of the current work window
+    free_at: float                  # now if idle, else end of the current job
+    shift_start: float = 0.0        # start of the first shift (roster); then work_h on / rest_h off
     status: TeamStatus = TeamStatus.IDLE
     current_job: str | None = None  # locked (C7)
 
@@ -61,12 +62,12 @@ class Site:
 
 @dataclass
 class ScoreBreakdown:
-    total: float = 0.0
-    weighted_customer_hours: float = 0.0     # Σ w_i (C_i - r_i): main term
+    total: float = 0.0                       # objective + stability penalty (what the search minimises)
+    objective: float = 0.0                   # Σ f_i(C_i): weighted outage + starvation term
+    weighted_customer_hours: float = 0.0     # Σ w_i (C_i - r_i)
     customer_hours: float = 0.0              # Σ n_i (C_i - r_i): the README's N×T indicator
     stability_penalty: float = 0.0
-    travel_penalty: float = 0.0
-    fairness_penalty: float = 0.0
+    starvation_penalty: float = 0.0
     kpis: dict[str, float] = field(default_factory=dict)
 
 
@@ -99,5 +100,6 @@ class ExplanationFacts:
     factors: dict[str, float | bool]
     best_alternative_team: dict | None = None        # {"team": "T04", "delta_score": 410}
     best_alternative_incident: dict | None = None    # {"incident": "INC_...", "delta_score": 180}
+    alternatives: list[dict] | None = None           # next best teams: team, delta, restored_h, travel_min
     binding_constraint: str | None = None
     tipping_point: str | None = None
