@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 from dispatch.config import ROOT, load_config
 from dispatch.copilot.translate import REASONS
 from dispatch.copilot.validator import InvalidModifier, validate
-from dispatch.data.loaders import list_crises
+from dispatch.data.loaders import list_crises, list_scenarios
 from dispatch.engine.modifiers import to_dict
 from dispatch.engine.shifts import is_on_duty, window
 from dispatch.learning import registry as reg
@@ -140,7 +140,7 @@ def health():
 
 @app.get("/crises")
 def crises():
-    return list_crises(cfg)
+    return list_scenarios(cfg) + list_crises(cfg)
 
 
 @app.get("/reasons")
@@ -151,7 +151,7 @@ def reasons():
 
 @app.post("/sessions")
 def start(body: StartBody):
-    if body.crisis_id not in list_crises(cfg):
+    if body.crisis_id not in list_crises(cfg) and body.crisis_id not in list_scenarios(cfg):
         raise HTTPException(404, "crise inconnue")
     s = LiveSession.start(cfg, body.crisis_id, budget_ms=body.budget_ms, log=log, teams_fraction=body.teams_fraction)
     sid = str(next(_ids))

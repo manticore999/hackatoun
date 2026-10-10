@@ -24,7 +24,7 @@ from dispatch.copilot import answers as A
 from dispatch.copilot.explain import explain_card
 from dispatch.copilot.validator import InvalidModifier, validate
 from dispatch.data import routes as road
-from dispatch.data.loaders import list_crises
+from dispatch.data.loaders import list_crises, list_scenarios
 from dispatch.engine.modifiers import to_dict
 
 router = APIRouter(prefix="/crises", tags=["front-end (timeline mode)"])
@@ -120,7 +120,7 @@ def _log(run: CrisisRun, d: dict) -> None:
 
 
 def get_run(crisis: str, share: float = 1.0) -> CrisisRun:
-    if crisis not in list_crises(cfg):
+    if crisis not in list_crises(cfg) and crisis not in list_scenarios(cfg):
         raise HTTPException(404, "crise inconnue")
     key = (crisis, round(share, 3))
     with _lock:
@@ -130,7 +130,32 @@ def get_run(crisis: str, share: float = 1.0) -> CrisisRun:
 
 
 def warm_up(crisis: str) -> None:
-    threading.Thread(target=lambda: get_run(crisis), daemon=True).start()
+    def go():
+        run = get_run(crisis)
+        _prefetch_routes(run)
+    threading.Thread(target=go, daemon=True).start()
+
+
+def _prefetch_routes(run: "CrisisRun") -> None:
+    """Fetch (and cache on disk) the road geometry of every proposed route of the crisis, in the background, so the
+    map never has to wait for the routing service during the demo (same coordinates as the front's requests)."""
+    import time
+    pairs = []
+    for snap in run.ours.snapshots:
+        teams = {t["id"]: t for t in snap["teams"]}
+        incs = {i["id"]: i for i in snap["incidents"]}
+        for r in snap["recommendations"]:
+            tm, inc = teams.get(r["teamId"]), incs.get(r["incidentId"])
+            if tm and inc:
+                pairs.append(((tm["lon"], tm["lat"]), (inc["lon"], inc["lat"])))
+    done = 0
+    for a, b in dict.fromkeys(pairs):                            # unique, in order of appearance
+        known = road._key(a, b) in road._load()
+        out = road.route(a, b, cfg.travel.osrm_url)
+        done += out["source"] == "osrm"
+        if not known:
+            time.sleep(0.15)                                     # polite to the public routing service
+    print(f"route prefetch {run.crisis}: {done}/{len(dict.fromkeys(pairs))} road routes cached", flush=True)
 
 
 @router.get("/{crisis}/meta")

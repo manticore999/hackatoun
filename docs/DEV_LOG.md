@@ -243,6 +243,15 @@ Tests stub the LLM (`tests/conftest.py`). Benchmarks: `bench/run_benchmark.py`, 
   - Removed the Streamlit app (`app/`, `app` extra): the React front-end is the only UI.
   - Known limits: the live lock is held while a refusal is priced (≤ 1 s re-plan; the LLM translation runs outside
     it); a team late on its estimated travel sits at the outage on the map until the field reports it on site.
+- [x] Demo scenario CRISE_DEMO (2026-10-10, user: "starts simple, gets harder, more outages than teams, must fail the
+      90 % so the alert shows"). `bench/make_demo_scenario.py` (seeded) builds 331 outages from real substations,
+      durations and causes into `data/scenarios/scenarios.csv` (kept apart from the 100 historical crises:
+      `list_scenarios`, loaders fall back to it). Ramp 1 outage / 30 min -> peak ~11 / 30 min, storm moving Gers ->
+      Haute-Garonne -> Ariège. Engine replay: plans of 1, 1, 1, 5, 5, 2, 3, 10, 8, 9 teams at the start; the 48 h alert
+      appears at 09h56 the next day (15 h in) and stays; final 410 520 vs reference 613 860 customer-h (-33 %).
+      Default crisis of the API warm-up and of the front (VITE_CRISIS). Routes: the front never caches a straight
+      fallback any more (asked again later); the server prefetches every proposed route of the warmed crisis into
+      data/cache/routes.json at start-up (331/331 cached). Reinforcement popup shows one decimal rounded down.
 - [ ] NEXT FEATURE (user idea, not started): accept a whole PLAN instead of route by route — the engine proposes up to 3
       alternative plans (or one when only one is sensible), each with its N×T, 90 %/48 h check and the main differences;
       the manager accepts one plan.

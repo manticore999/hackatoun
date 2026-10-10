@@ -73,7 +73,7 @@ simulation:
 timeline:                    # EnedisPO front-end: crisis replayed in steps of crisis time (not wall-clock)
   step_minutes: 30
   budget_ms: 100             # search budget per step when (re)computing a whole timeline
-  default_crisis: CRISE_027  # pre-computed at API start-up
+  default_crisis: CRISE_DEMO  # pre-computed at API start-up (demo scenario, bench/make_demo_scenario.py)
 
 live:                        # real-time mode: the clock is the wall clock from the moment the crisis is opened
   budget_ms: 800             # local search budget per re-plan (bursts of alerts are coalesced: one re-plan per tick)

@@ -28,7 +28,8 @@ export function useRoadFetch(wanted: Map<string, [LonLat, LonLat]>, onLoaded: ()
     source
       .roads(batch.map(([, pair]) => pair))
       .then((res) => {
-        res.forEach((r, i) => cache.set(batch[i][0], r.coordinates));
+        // keep only real road geometry: a straight fallback (routing service down / rate limited) is asked again later
+        res.forEach((r, i) => r.source === 'osrm' && r.coordinates.length > 2 && cache.set(batch[i][0], r.coordinates));
         onLoaded();
       })
       .catch(() => {

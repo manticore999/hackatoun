@@ -110,7 +110,7 @@ export interface CrisisSource {
 }
 
 const kind = (import.meta.env.VITE_DATA_SOURCE ?? 'mock') as 'mock' | 'api';
-const crisis = (new URLSearchParams(location.search).get('crise') ?? import.meta.env.VITE_CRISIS ?? 'CRISE_027') as string;
+const crisis = (new URLSearchParams(location.search).get('crise') ?? import.meta.env.VITE_CRISIS ?? 'CRISE_DEMO') as string;
 const apiUrl = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000') as string;
 
 /** True when the live mode exists (real engine); the mock only replays. */

@@ -175,7 +175,9 @@ export function TopBar() {
           </span>
         ) : (
           <span>
-            Revue de la crise {meta.crisisId.replace('CRISE_', 'n° ')} du {fmtDay(Date.parse(meta.start))} (temps accéléré) · Ariège, Haute-Garonne, Gers
+            {meta.crisisId === 'CRISE_DEMO'
+              ? `Scénario de démonstration : une tempête qui s’intensifie · ${fmtDay(Date.parse(meta.start))} (temps accéléré) · Gers, Haute-Garonne, Ariège`
+              : `Revue de la crise ${meta.crisisId.replace('CRISE_', 'n° ')} du ${fmtDay(Date.parse(meta.start))} (temps accéléré) · Ariège, Haute-Garonne, Gers`}
           </span>
         )}
       </div>

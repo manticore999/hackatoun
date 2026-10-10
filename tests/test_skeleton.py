@@ -43,3 +43,15 @@ def test_travel_distance():
 def test_modifier_catalogue():
     assert {"force", "forbid", "zone_inaccessible", "duration_update", "weight"} <= set(CATALOGUE)
 
+
+
+def test_demo_scenario():
+    """CRISE_DEMO (bench/make_demo_scenario.py): starts with one outage at a time, ramps up, kept apart from the 100."""
+    from dispatch.data.loaders import list_scenarios
+    assert "CRISE_DEMO" in list_scenarios(cfg) and "CRISE_DEMO" not in list_crises(cfg)
+    incidents, _ = load_incidents(cfg, "CRISE_DEMO")
+    assert len(incidents) > 300
+    # times count from the first outage (18h26): the first 1.5 h are the calm phase, one outage per half hour
+    calm = sum(i.reported_at < 1.5 for i in incidents)
+    peak_2h = max(sum(h <= i.reported_at < h + 2 for i in incidents) for h in range(0, 20))
+    assert calm <= 4 and peak_2h > 8 * calm
