@@ -237,6 +237,8 @@ function RefusalModal({ recId }: { recId?: string }) {
 }
 
 // ---------------------------------------------------------------- reinforcement
+/** Share as a percentage, one decimal, rounded DOWN: 89.7 % must never read "90 %" next to a missed 90 % target. */
+const pct = (x: number) => (Math.floor(x * 1000) / 10).toFixed(1).replace('.', ',').replace(',0', '');
 function ReinforcementModal() {
   const step = useStore(stepOf);
   const [r, setR] = useState<Reinforcement | null>(null);
@@ -281,7 +283,7 @@ function ReinforcementModal() {
       {r && (
         <>
           <div className="reinf-figure">
-            <span className={`reinf-share ${r.target_met ? 'ok' : 'over'}`}>{Math.round(r.projected_share * 100)} %</span>
+            <span className={`reinf-share ${r.target_met ? 'ok' : 'over'}`}>{pct(r.projected_share)} %</span>
             <span>
               des {unit.long} à 48 h (objectif {Math.round(r.target * 100)} %)
             </span>
@@ -292,7 +294,7 @@ function ReinforcementModal() {
             <>
               <p>
                 Objectif hors d’atteinte. Avec <b>{rf.extra_teams} équipe(s) en renfort</b>, le plan atteint{' '}
-                <b>{Math.round(rf.projected_share_after * 100)} %</b>. Sites où les placer (en surbrillance sur la carte) :
+                <b>{pct(rf.projected_share_after)} %</b>. Sites où les placer (en surbrillance sur la carte) :
               </p>
               <ul className="reinf-sites">
                 {rf.sites

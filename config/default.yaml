@@ -73,7 +73,7 @@ simulation:
 timeline:                    # EnedisPO front-end: crisis replayed in steps of crisis time (not wall-clock)
   step_minutes: 30
   budget_ms: 100             # search budget per step when (re)computing a whole timeline
-  default_crisis: CRISE_027  # pre-computed at API start-up
+  default_crisis: CRISE_DEMO  # pre-computed at API start-up (demo scenario, bench/make_demo_scenario.py)
 
 learning:
   db_path: data/decisions.sqlite   # knowledge base of decisions (accepted / modified / rejected)

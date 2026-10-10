@@ -105,7 +105,7 @@ export interface CrisisSource {
 }
 
 const kind = (import.meta.env.VITE_DATA_SOURCE ?? 'mock') as 'mock' | 'api';
-const crisis = (import.meta.env.VITE_CRISIS ?? 'CRISE_027') as string;
+const crisis = (import.meta.env.VITE_CRISIS ?? 'CRISE_DEMO') as string;
 
 export const source: CrisisSource =
   kind === 'api'

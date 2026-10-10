@@ -167,7 +167,9 @@ export function TopBar() {
       <div className="topbar-title">
         <b>Pilotage de crise</b>
         <span>
-          Rejeu de la crise {crisis.replace('CRISE_', 'n° ')} du {fmtDay(Date.parse(start))} · Ariège, Haute-Garonne, Gers
+          {crisis === 'CRISE_DEMO'
+            ? `Scénario de démonstration : une tempête qui s’intensifie · ${fmtDay(Date.parse(start))} · Gers, Haute-Garonne, Ariège`
+            : `Rejeu de la crise ${crisis.replace('CRISE_', 'n° ')} du ${fmtDay(Date.parse(start))} · Ariège, Haute-Garonne, Gers`}
         </span>
       </div>
       <div className="topbar-right">

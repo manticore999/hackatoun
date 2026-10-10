@@ -211,6 +211,15 @@ Tests stub the LLM (`tests/conftest.py`). Benchmarks: `bench/run_benchmark.py`, 
       wrapping; long tags in "Changer d'équipe"; Enter validated one line (slow replay) -> validates the plan; plans
       validated in the browser lost after a refusal replay (store.withLocal re-applies them); journal now lists every
       plan validated so far; each page load = fresh demo (reset is instant unless a replay modified the timeline).
+- [x] Demo scenario CRISE_DEMO (2026-10-10, user: "starts simple, gets harder, more outages than teams, must fail the
+      90 % so the alert shows"). `bench/make_demo_scenario.py` (seeded) builds 331 outages from real substations,
+      durations and causes into `data/scenarios/scenarios.csv` (kept apart from the 100 historical crises:
+      `list_scenarios`, loaders fall back to it). Ramp 1 outage / 30 min -> peak ~11 / 30 min, storm moving Gers ->
+      Haute-Garonne -> Ariège. Engine replay: plans of 1, 1, 1, 5, 5, 2, 3, 10, 8, 9 teams at the start; the 48 h alert
+      appears at 09h56 the next day (15 h in) and stays; final 410 520 vs reference 613 860 customer-h (-33 %).
+      Default crisis of the API warm-up and of the front (VITE_CRISIS). Routes: the front never caches a straight
+      fallback any more (asked again later); the server prefetches every proposed route of the warmed crisis into
+      data/cache/routes.json at start-up (331/331 cached). Reinforcement popup shows one decimal rounded down.
 - [ ] NEXT FEATURE (user idea, not started): accept a whole PLAN instead of route by route — the engine proposes up to 3
       alternative plans (or one when only one is sensible), each with its N×T, 90 %/48 h check and the main differences;
       the manager accepts one plan.

@@ -32,7 +32,22 @@ def load_postes(cfg) -> pd.DataFrame:
 
 
 def list_crises(cfg) -> list[str]:
+    """The 100 historical crises (benchmarks, backtests). Demo scenarios are listed apart (list_scenarios)."""
     return sorted(_read(cfg, "incidents")["numero_crise"].unique())
+
+
+SCENARIOS = Path("data/scenarios/scenarios.csv")
+
+
+def _scenarios() -> pd.DataFrame | None:
+    path = ROOT / SCENARIOS
+    return pd.read_csv(path, sep=";", encoding="utf-8-sig") if path.exists() else None
+
+
+def list_scenarios(cfg=None) -> list[str]:
+    """Generated demo scenarios (bench/make_demo_scenario.py), same format as the historical crises."""
+    df = _scenarios()
+    return [] if df is None else sorted(df["numero_crise"].unique())
 
 
 def load_sites(cfg) -> list[Site]:
@@ -69,7 +84,11 @@ def load_teams(cfg, sites: list[Site] | None = None, roster: dict[str, int] | No
 def load_incidents(cfg, crisis_id: str) -> tuple[list[Incident], datetime]:
     """Incidents of one crisis, times in hours since the first incident (t0). Returns (incidents, t0)."""
     df = _read(cfg, "incidents")
+    if crisis_id not in set(df["numero_crise"]):
+        df = _scenarios() if _scenarios() is not None else df
     df = df[df["numero_crise"] == crisis_id].copy()
+    if df.empty:
+        raise ValueError(f"unknown crisis {crisis_id}")
     df["ts"] = pd.to_datetime(df["dateHeureIncident"], format="%d/%m/%Y %H:%M")
     t0 = df["ts"].min()
     postes = load_postes(cfg)
