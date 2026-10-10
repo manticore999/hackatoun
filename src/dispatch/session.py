@@ -79,6 +79,11 @@ class LiveSession:
     _rng: random.Random = field(default_factory=lambda: random.Random(0))
     policy: object | None = None                                  # None = optimised engine (RSLS)
     simulated: bool = False                                       # entries logged as synthetic (demo)
+    # Live mode: the world is only known through field events (incident reported, team on site, repair done) sent
+    # by an external system; nothing is simulated here. Replay mode (False): arrivals and completions are simulated.
+    external_field: bool = False
+    on_site: set = field(default_factory=set)                     # live: incidents whose team reported on site
+    dispatches: list = field(default_factory=list)                # live: trips started, read by the field system
 
     # ------------------------------------------------------------------ creation
     @classmethod
@@ -95,6 +100,50 @@ class LiveSession:
                 permanent=load_registry(cfg), policy=policy)
         s.advance(0.0)
         return s
+
+    @classmethod
+    def empty(cls, cfg, t0: datetime, budget_ms: int | None = None, log: DecisionLog | None = None) -> "LiveSession":
+        """Live crisis starting at t0 (H0) with every team at its site and no incident yet."""
+        sites = load_sites(cfg)
+        return cls(cfg=cfg, crisis_id="LIVE", incidents=[], teams=load_teams(cfg, sites), sites=sites, t0=t0,
+                   budget_ms=budget_ms, log=log, permanent=load_registry(cfg), external_field=True)
+
+    # ------------------------------------------------------------------ field events (live mode)
+    def report(self, inc: Incident) -> None:
+        """A new incident is reported by the field."""
+        if any(i.id == inc.id for i in self.incidents):
+            return
+        self.incidents.append(inc)
+        self.pending[inc.id] = inc
+        self._arrival_i = len(self.incidents)
+
+    def arrived(self, team_id: str, incident_id: str, at: float) -> None:
+        """The team reports it is on site: the repair starts now, its end is re-estimated from here."""
+        if incident_id not in self.in_progress:
+            return
+        tid, go, _, _ = self.in_progress[incident_id]
+        C = at + next(i for i in self.incidents if i.id == incident_id).est_duration
+        self.in_progress[incident_id] = (tid, go, at, C)
+        self.on_site.add(incident_id)
+        team = self.team(tid)
+        team.status, team.free_at = TeamStatus.REPAIRING, C
+
+    def repaired(self, team_id: str, incident_id: str, at: float) -> None:
+        """The team reports the repair is done: customers restored, the team is free where it stands."""
+        if incident_id not in self.in_progress:
+            return
+        tid = self.in_progress.pop(incident_id)[0]
+        self.on_site.discard(incident_id)
+        self.restored[incident_id] = at
+        team = self.team(tid)
+        team.status, team.current_job, team.free_at = TeamStatus.IDLE, None, at
+
+    def hold_overruns(self) -> None:
+        """Live: a team whose repair takes longer than estimated is still busy (never planned as free in the past)."""
+        for iid, (tid, go, arrive, C) in self.in_progress.items():
+            if C < self.now:
+                team = self.team(tid)
+                team.free_at = max(team.free_at, self.now + 1 / 60)
 
     # ------------------------------------------------------------------ clock
     def clock(self, h: float) -> str:
@@ -138,6 +187,8 @@ class LiveSession:
 
     def _move_clock(self, t: float) -> None:
         self.now = t
+        if self.external_field:                                   # arrivals and completions come as events
+            return
         while self._arrival_i < len(self.incidents) and self.incidents[self._arrival_i].reported_at <= t + EPS:
             inc = self.incidents[self._arrival_i]
             self.pending[inc.id] = inc
@@ -275,14 +326,22 @@ class LiveSession:
             min(self._interactive_budget(), 100))
         go, arrive, _ = timing_plan.schedule[incident_id]
         go = max(go, self.now)
-        s = self.cfg.simulation.duration_noise_sigma
-        actual = inc.est_duration if not s else inc.est_duration * math.exp(self._rng.gauss(-s * s / 2, s))
-        C = arrive + actual
+        if self.external_field:                                   # live: the field will report the real times
+            arrive = go + (arrive - timing_plan.schedule[incident_id][0])
+            C = arrive + inc.est_duration
+        else:
+            s = self.cfg.simulation.duration_noise_sigma
+            actual = inc.est_duration if not s else inc.est_duration * math.exp(self._rng.gauss(-s * s / 2, s))
+            C = arrive + actual
         del self.pending[incident_id]
         self.in_progress[incident_id] = (team_id, go, arrive, C)
         self.trip_origin[incident_id] = (team.lat, team.lon)
         team.status, team.current_job, team.free_at, team.lat, team.lon = TeamStatus.TRAVELLING, incident_id, C, inc.lat, inc.lon
-        heapq.heappush(self._busy, (C, team_id, incident_id))
+        if self.external_field:
+            self.dispatches.append({"seq": len(self.dispatches) + 1, "team": team_id, "incident": incident_id,
+                                    "depart_h": go, "travel_h": arrive - go, "repair_h": inc.est_duration})
+        else:
+            heapq.heappush(self._busy, (C, team_id, incident_id))
         return recommended
 
     def position(self, team: Team, t: float | None = None) -> tuple[float, float]:
@@ -297,10 +356,12 @@ class LiveSession:
         return team.lat, team.lon
 
     def reject(self, team_id: str, incident_id: str, reason_code: str | None = None,
-               reason_text: str | None = None) -> dict:
-        """Turn the refusal into a proposed rule, price it, and wait for the manager's confirmation."""
+               reason_text: str | None = None, translated: dict | None = None) -> dict:
+        """Turn the refusal into a proposed rule, price it, and wait for the manager's confirmation.
+        `translated`: the reason already turned into modifiers (reason_to_modifiers) by a caller that ran the LLM
+        outside a lock (live mode: the dashboard must not freeze while the LLM answers)."""
         ctx_info = self._context_info(team_id, incident_id)
-        out = reason_to_modifiers(reason_code, reason_text, ctx_info, self.cfg)
+        out = translated or reason_to_modifiers(reason_code, reason_text, ctx_info, self.cfg)
         if out.get("question"):
             return {"question": out["question"]}
         for raw in out.get("modifiers", []):

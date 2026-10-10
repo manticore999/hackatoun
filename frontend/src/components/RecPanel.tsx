@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Recommendation, Snapshot } from '../data/contract';
 import { fmt1, fmtHour, fmtInt, fmtMinutes } from '../lib/format';
-import { source, type PlanExplanation } from '../data/source';
+import { mode, source, type PlanExplanation } from '../data/source';
 import { interpretLine, interpretPlan } from '../copilot/interpret';
 import { planColour } from './MapView';
 import { endMinutes, stepOf, useFocusedRec, useOursSnapshot, useStore } from '../state/store';
@@ -130,7 +130,9 @@ function EmptyState({ snap }: { snap: Snapshot }) {
       {done
         ? 'Crise terminée : tous les clients sont réalimentés.'
         : k.incidentsWaiting === 0
-          ? 'Aucun incident en attente.'
+          ? mode === 'live' && !snap.incidents.length
+            ? 'En veille : aucune alerte reçue. Le moteur proposera un plan dès qu’une panne est signalée.'
+            : 'Aucun incident en attente.'
           : k.teamsAvailable === 0
             ? 'Toutes les équipes sont engagées.'
             : 'Les équipes libres n’ont pas l’amplitude nécessaire.'}
@@ -277,7 +279,7 @@ function PlanCard({ snap, focusedId, hoveredRecId }: { snap: Snapshot; focusedId
           {snap.decisions.length} équipe{snap.decisions.length > 1 ? 's' : ''} en route : leurs trajets gardent cette couleur sur la carte. Le moteur proposera le prochain plan
           dès qu’une équipe se libère ou qu’un incident arrive.
         </p>
-        {!playing && (
+        {!playing && mode !== 'live' && (
           <button className="pill primary plan-accept" onClick={() => useStore.getState().play()}>
             Continuer la simulation
           </button>
@@ -290,7 +292,9 @@ function PlanCard({ snap, focusedId, hoveredRecId }: { snap: Snapshot; focusedId
         <h2 className="card-title">Plan proposé</h2>
         <EmptyState snap={snap} />
         <p className="plan-help">
-          {atEnd
+          {mode === 'live'
+            ? 'Le moteur surveille les alertes en temps réel : un nouveau plan apparaîtra ici dès qu’une panne arrive ou qu’une équipe se libère.'
+            : atEnd
             ? 'Fin de la simulation : « Rejouer » en bas, ou cliquez dans la chronologie pour revenir à un moment.'
             : playing
               ? 'Le moteur proposera un plan dès qu’un incident arrive ou qu’une équipe se libère.'
@@ -321,7 +325,7 @@ function PlanCard({ snap, focusedId, hoveredRecId }: { snap: Snapshot; focusedId
 
       <div className="plan-decision">
         <button className="pill primary plan-accept" disabled={busy} onClick={() => acceptPlan(true)}>
-          {busy ? 'Validation…' : 'Valider le plan et continuer'}
+          {busy ? 'Validation…' : mode === 'live' ? 'Valider le plan : envoyer les équipes' : 'Valider le plan et continuer'}
         </button>
         {source.refuse && (
           <button className="pill plan-refuse" disabled={busy} onClick={() => useStore.getState().openModal({ kind: 'refusal' })}>
@@ -376,7 +380,7 @@ export function Journal({ snap }: { snap: Snapshot }) {
         <h2 className="card-title">
           Décisions prises <span className="count">{total}</span>
         </h2>
-        {total > 0 && (
+        {total > 0 && mode !== 'live' && (
           <button className="pill small" disabled={busy} onClick={() => resetDecisions()}>
             Tout annuler
           </button>

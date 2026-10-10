@@ -47,15 +47,19 @@ app = FastAPI(title="Pilotage de crise - moteur de dispatch", version="0.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(GZipMiddleware, minimum_size=1000)          # timelines: ~17 MB of JSON -> ~1-2 MB
 
-from dispatch.api import frontend as _front  # noqa: E402  (EnedisPO front-end routes, timeline mode)
+from dispatch.api import frontend as _front  # noqa: E402  (EnedisPO front-end routes, replay of a past crisis)
+from dispatch.api import live as _live  # noqa: E402  (EnedisPO front-end routes, real time)
 
 _front.cfg, _front.log = cfg, log
+_live.cfg, _live.log = cfg, log
+app.include_router(_live.router)
 app.include_router(_front.router)
 app.include_router(_front.routes_router)
 
 
 @app.on_event("startup")
 def _warm_up():
+    _live.start_ticker()
     _front.warm_up(cfg.timeline.default_crisis)
 
 
@@ -268,6 +272,7 @@ def learning_activate(body: CandidateBody):
         raise HTTPException(422, "approved_by (rôle de l'expert) obligatoire")
     entry = reg.activate(body.candidate, body.approved_by)
     _front.invalidate_all()                       # crises are recomputed with the new permanent rule
+    _live.reload_registry()
     return entry
 
 
@@ -286,6 +291,7 @@ def learning_simulate(body: SimulateBody):
 def learning_retire(constraint_id: str):
     reg.retire(constraint_id)
     _front.invalidate_all()
+    _live.reload_registry()
     return reg.read()
 
 

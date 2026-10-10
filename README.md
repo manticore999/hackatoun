@@ -18,8 +18,9 @@ python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 pip install -e ".[all]"
 pytest                                # skeleton tests must pass
-streamlit run app/streamlit_app.py    # map of sites + one crisis
 ```
+
+The interface is the React front-end in [`frontend/`](frontend/README.md) (see "Run it" below).
 
 For the LLM layer: copy `.env.example` to `.env` and set `OPENROUTER_API_KEY` (free models; without a key, templates are used).
 
@@ -48,9 +49,10 @@ python bench/review_refusals.py --simulate CRISE_051 CRISE_046     # feedback lo
 | Counterfactual (override cost), explanation facts | ✅ `engine/counterfactual.py`, `engine/explain.py` |
 | 90 % at H+48 check + reinforcement what-if | ✅ `engine/service.py`, `sim/whatif.py` |
 | Event-driven simulator | ✅ `sim/simulator.py` |
-| Streamlit UI (replay, recommendations, 48 h check) | ✅ first version |
+| React front-end (EnedisPO: map, plan validation, timeline, copilot, learning loop) | ✅ `frontend/` |
 | **Live session** (step-by-step crisis, accept / reject / confirm, what-if, service check) | ✅ `session.py` |
 | **HTTP API** for the front-end | ✅ `api/app.py`, see [docs/API.md](docs/API.md) |
+| **Live mode** (real clock, field events, plan validated before any dispatch) + separate field simulator | ✅ `live/service.py`, `api/live.py`, `simulator/` |
 | LLM layer: explanations, refusal reason → rules, validator | ✅ works without a key (templates + rule parser); uses OpenRouter (`nvidia/nemotron-3-super-120b-a12b:free`, Gemma 4 fallback) when `OPENROUTER_API_KEY` is set. Cards: short headline + expandable 2-sentence details + the 3 best paths |
 | Knowledge base of decisions, past-refusal hints | ✅ `learning/memory.py` (SQLite, `data/decisions.sqlite`) |
 | Periodic expert review → replay test → versioned constraint registry | ✅ `learning/review.py`, `learning/registry.py`, `bench/review_refusals.py` |
@@ -63,12 +65,21 @@ python bench/review_refusals.py --simulate CRISE_051 CRISE_046     # feedback lo
 See [docs/PIPELINE.md](docs/PIPELINE.md) for the engine → LLM → front-end loop and what data crosses each step.
 | OR-Tools reference solver + gap measurement (live 3 s plan: +2.3 % on average vs OR-Tools 60 s) | ✅ `engine/reference_ortools.py`, `bench/gap_vs_ortools.py` |
 
-### API
+### Run it (live mode: the crisis in real time)
 
 ```bash
 pip install -e ".[api]"
-uvicorn dispatch.api.app:app --reload --app-dir src     # docs at http://localhost:8000/docs
+uvicorn dispatch.api.app:app --app-dir src --port 8000            # backend, docs at http://localhost:8000/docs
+cd frontend && npm install && VITE_DATA_SOURCE=api npm run dev     # dashboard, http://localhost:5173
+python -m simulator --crisis CRISE_027 --speed 60                  # the field: alerts + team reports (separate process)
 ```
+
+The dashboard opens on the **live crisis**: the clock is the real one, the engine waits for alerts and re-plans as they
+arrive, and nothing is dispatched until the manager validates the plan. The field (alert system, teams' terminals) is
+played by `simulator/`, a separate process that only talks to the API: it replays a past crisis shifted to now and
+reports when each team is on site and when its repair is done. `--speed 1` is true real time; `--speed 60` plays one
+hour of crisis per minute for a demo (the clock still starts now). « Revoir une crise passée » in the top bar
+(`?mode=replay&crise=CRISE_027`) replays a past crisis in accelerated time with the same engine, to review what was done.
 
 ## How it works
 
@@ -100,10 +111,12 @@ src/dispatch/
   data/                     loaders (only code that knows the CSV format), travel times
   engine/                   types (shared contract), modifiers catalogue, evaluate, baselines,
                             construct, local_search, planner, counterfactual, explain, reference_ortools
-  sim/                      events, sources (CSV replay, manual, generator), simulator
+  sim/                      events, sources (CSV replay, manual, generator), simulator (benchmarks)
+  live/                     the crisis in real time: field events in, plans out, ticker (API: /live)
   copilot/                  Claude client, explanations, reason -> modifiers, validator
   learning/                 calibration, decision memory, preference learning
-app/streamlit_app.py        French UI (map, recommendations, active rules)
+frontend/                   React UI (EnedisPO): map, plan validation, timeline, copilot, see frontend/README.md
+simulator/                  field simulator for the live mode (separate process, HTTP only): past crisis from now
 bench/run_benchmark.py      all policies x all crises, same simulator, same score
 tests/                      skeleton tests + engine acceptance tests (skipped until implemented)
 ```
@@ -117,7 +130,7 @@ tests/                      skeleton tests + engine acceptance tests (skipped un
 | Simulator & event sources | `src/dispatch/sim/` | | brief §5 (contract) |
 | LLM copilot & validator | `src/dispatch/copilot/` | | brief §7–§8 |
 | Learning loops | `src/dispatch/learning/` | | team brief, section "Self-improvement" |
-| Interface | `app/` | | team brief §8 (demo script) |
+| Interface | `frontend/` | | `frontend/README.md`, `frontend/HANDOFF.md` |
 | Benchmark | `bench/` | | brief §9 (T9–T10) |
 
 ## Team conventions

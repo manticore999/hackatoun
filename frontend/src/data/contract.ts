@@ -43,6 +43,11 @@ export type Team = {
   status: TeamStatus;
   shiftHoursLeft: number; // out of 12
   incidentId?: string;
+  /** ADDED (real engine): shift group of the fixed roster (A at H0, B a little later, C the relief) */
+  group?: 'A' | 'B' | 'C';
+  /** ADDED (real engine): current shift (or the next one when resting), ISO */
+  shiftStart?: string;
+  shiftEnd?: string;
 };
 
 export type Alternative = {
@@ -118,7 +123,20 @@ export type Snapshot = {
 // ADDED: static crisis description, fetched once
 export type Site = { id: string; name: string; lon: number; lat: number; teams: number };
 
+// ADDED (real engine): the fixed shift schedule, explained to the manager
+export type Roster = {
+  workHours: number;
+  restHours: number;
+  groups: { id: 'A' | 'B' | 'C'; offsetHours: number; firstShiftStart: string; teams: number }[];
+};
+
 export type CrisisMeta = {
+  /** ADDED: 'live' = the crisis as it happens (real clock), 'replay' = a past crisis replayed (accelerated) */
+  mode?: 'live' | 'replay';
+  label?: string;
+  /** ADDED (live): clock speed (1 = real time) */
+  speed?: number;
+  roster?: Roster;
   crisisId: string;
   start: string; // ISO, time of snapshot 0
   stepMinutes: number;

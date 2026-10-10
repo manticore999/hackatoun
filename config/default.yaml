@@ -75,6 +75,11 @@ timeline:                    # EnedisPO front-end: crisis replayed in steps of c
   budget_ms: 100             # search budget per step when (re)computing a whole timeline
   default_crisis: CRISE_027  # pre-computed at API start-up
 
+live:                        # real-time mode: the clock is the wall clock from the moment the crisis is opened
+  budget_ms: 800             # local search budget per re-plan (bursts of alerts are coalesced: one re-plan per tick)
+  history_minutes: 10        # one dashboard snapshot every N minutes of crisis time (timeline, journal)
+  tick_seconds: 1.0          # how often the clock is checked (due departures, shift changes)
+
 learning:
   db_path: data/decisions.sqlite   # knowledge base of decisions (accepted / modified / rejected)
   review_min_refusals: 3          # a (site -> zone) pattern refused this many times becomes a candidate rule

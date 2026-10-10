@@ -7,7 +7,6 @@ import json
 import re
 
 from dispatch.copilot.client import chat, llm_available
-from dispatch.copilot.explain import check_numbers_grounded  # noqa: F401  (kept for symmetry)
 
 SYSTEM = (
     "Tu es le copilote d'un responsable de crise Enedis pendant une tempête. Fonctionnement du système : un moteur "
@@ -64,13 +63,14 @@ def saturation(snap: dict) -> str:
 
 
 def reinforcement_text(r: dict) -> str:
+    unit = "des clients coupés rétablis" if r.get("basis") == "customers" else "des incidents signalés réparés"
     if r.get("target_met"):
-        return (f"Pas besoin de renfort : selon le plan actuel, 90 % des clients coupés sont rétablis avant 48 h "
-                f"({round(100 * r['projected_share'])} % à 48 h).")
+        return (f"Pas besoin de renfort : selon le plan actuel, {round(100 * r['projected_share'])} % {unit} avant "
+                f"48 h (objectif 90 %).")
     rf = r.get("reinforcement") or {}
     sites = ", ".join(f"{n} à {c}" for c, n in rf.get("by_site", {}).items())
-    return (f"Objectif 90 % à 48 h hors d'atteinte : {round(100 * r['projected_share'])} % des clients coupés seraient "
-            f"rétablis à 48 h. Demander {rf.get('extra_teams', '?')} équipe(s) en renfort ({sites}) permettrait d'atteindre "
+    return (f"Objectif 90 % à 48 h hors d'atteinte : {round(100 * r['projected_share'])} % {unit} à 48 h. Demander "
+            f"{rf.get('extra_teams', '?')} équipe(s) en renfort ({sites}) permettrait d'atteindre "
             f"{round(100 * (rf.get('projected_share_after') or 0))} %.")
 
 
@@ -85,3 +85,46 @@ def free_answer(question: str, snap: dict, cfg) -> str | None:
     allowed = _numbers(json.dumps(ctx, ensure_ascii=False)) | {"48", "50", "90"}
     allowed |= {str(int(float(n))) for n in allowed if n.replace(".", "", 1).isdigit()}
     return text if text and _numbers(text) <= allowed else None
+
+
+HELP = ("Je réponds à partir des données du moteur. Essayez : « Pourquoi ce plan ? », « Pourquoi cette équipe ? », "
+        "« Quels clients sensibles attendent ? », « Où est la saturation ? », « Faut-il des renforts ? ».")
+
+
+def answer(question: str, snap: dict, cfg, *, plan_explanation, rec_explanation, reinforcement, what_if=None,
+           final_score: float | None = None, rec_id: str | None = None) -> dict:
+    """Route a manager's question to the engine's data. Known intents get a deterministic answer; anything else goes
+    to the LLM with a factual context (numbers checked). The callables give the mode-specific engine answers:
+    plan_explanation() -> {resume, points, source}, rec_explanation(rec) -> {headline, paragraphs, limits, source},
+    reinforcement() -> service check, what_if(share) -> {score, baseline} (None when not available)."""
+    q = question.lower()
+    words = set(re.findall(r"\w+", q))
+    if "plan" in words and words & {"pourquoi", "justifie", "justifier", "explique", "expliquer"}:
+        e = plan_explanation()
+        return {"answer": "\n\n".join([e["resume"]] + [f"• {p}" for p in e["points"]]), "source": e["source"]}
+    if "pourquoi" in words:
+        recs = snap["recommendations"]
+        rec = next((r for r in recs if r["id"] == rec_id), recs[0] if recs else None)
+        if not rec:
+            return {"answer": "Aucune recommandation n'est en attente en ce moment.", "source": "engine"}
+        e = rec_explanation(rec)
+        return {"answer": "\n\n".join([e["headline"] + "."] + e["paragraphs"] + [e["limits"]]), "source": e["source"]}
+    if re.search(r"\b(50 ?%|moitié|perd\w*)", q):
+        if what_if is None or final_score is None:
+            return {"answer": "La simulation « et si » sur toute la crise n'est disponible qu'en revue d'une crise passée. "
+                              "En direct, demandez plutôt « Faut-il des renforts ? ».", "source": "engine"}
+        r = what_if(0.5)
+        delta = 100 * (r["score"] - final_score) / final_score if final_score else 0.0
+        return {"answer": (f"Simulation avec la moitié des équipes de chaque site :\n\n"
+                           f"• Coupure cumulée en fin de crise : {fmt(r['score'])} clients·h, soit {delta:+.0f} % par "
+                           f"rapport au plan actuel ({fmt(final_score)}).\n• La stratégie de référence monterait à "
+                           f"{fmt(r['baseline'])} clients·h dans les mêmes conditions.\n\nLevier : demander des renforts "
+                           f"sur les sites les plus chargés (« Faut-il des renforts ? »)."), "source": "engine"}
+    if "sensible" in q or "sensibles" in words:
+        return {"answer": sensitive(snap), "source": "engine"}
+    if words & {"renfort", "renforts", "fire", "objectif"} or re.search(r"\b48 ?h\b", q):
+        return {"answer": reinforcement_text(reinforcement()), "source": "engine"}
+    if "saturation" in q or "où" in words:
+        return {"answer": saturation(snap), "source": "engine"}
+    text = free_answer(question, snap, cfg)
+    return {"answer": text or HELP, "source": "llm" if text else "engine"}

@@ -18,7 +18,7 @@ import threading
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from dispatch.adapters.contract import describe_rule, rule_names
+from dispatch.adapters.contract import describe_rule, roster, rule_names
 from dispatch.adapters.timeline import TimelineRunner, align, session_at
 from dispatch.copilot import answers as A
 from dispatch.copilot.explain import explain_card
@@ -140,7 +140,8 @@ def meta(crisis: str, team_share: float = 1.0):
     counts = {}
     for t in s.teams:
         counts[t.home_site] = counts.get(t.home_site, 0) + 1
-    return {"crisisId": crisis, "start": run.ours.snapshots[0]["time"], "stepMinutes": cfg.timeline.step_minutes,
+    return {"crisisId": crisis, "mode": "replay", "roster": roster(s), "start": run.ours.snapshots[0]["time"],
+            "stepMinutes": cfg.timeline.step_minutes,
             "sites": [{"id": x.id, "name": x.commune, "lon": x.lon, "lat": x.lat, "teams": counts.get(x.id, 0)}
                       for x in s.sites],
             "strategies": [{"id": "ours", "label": "Copilote",
@@ -258,38 +259,12 @@ def _what_if(crisis: str, share: float) -> dict:
 def copilot(crisis: str, body: AskBody, team_share: float = 1.0):
     run = get_run(crisis, team_share)
     k = max(0, min(body.step, len(run.ours.snapshots) - 1))
-    snap = run.ours.snapshots[k]
-    q = body.question.lower()
-    if "plan" in q and ("pourquoi" in q or "justif" in q or "expli" in q):
-        e = plan_explanation(crisis, k, True, team_share)
-        return {"answer": "\n\n".join([e["resume"]] + [f"• {p}" for p in e["points"]]), "source": e["source"]}
-    if "pourquoi" in q:
-        recs = snap["recommendations"]
-        rec = next((r for r in recs if r["id"] == body.recId), recs[0] if recs else None)
-        if not rec:
-            return {"answer": "Aucune recommandation n'est en attente à ce pas de temps. Avancez la simulation.",
-                    "source": "engine"}
-        e = _explanation(run, k, rec["incidentId"])
-        return {"answer": "\n\n".join([e["headline"] + "."] + e["paragraphs"] + [e["limits"]]), "source": e["source"]}
-    if any(w in q for w in ("50", "moitié", "perd")):
-        r = _what_if(crisis, 0.5)
-        final = run.ours.snapshots[-1]["kpis"]["score"]
-        delta = 100 * (r["score"] - final) / final
-        return {"answer": (f"Simulation avec la moitié des équipes de chaque site :\n\n"
-                           f"• Coupure cumulée en fin de crise : {A.fmt(r['score'])} clients·h, soit {delta:+.0f} % par "
-                           f"rapport au plan actuel ({A.fmt(final)}).\n• La stratégie de référence monterait à "
-                           f"{A.fmt(r['baseline'])} clients·h dans les mêmes conditions.\n\nLevier : demander des renforts "
-                           f"sur les sites les plus chargés (« Faut-il des renforts ? »)."), "source": "engine"}
-    if "sensible" in q:
-        return {"answer": A.sensitive(snap), "source": "engine"}
-    if any(w in q for w in ("renfort", "fire", "objectif", "48")):
-        return {"answer": A.reinforcement_text(_reinforcement(run, k)), "source": "engine"}
-    if "saturation" in q or " où" in f" {q}":
-        return {"answer": A.saturation(snap), "source": "engine"}
-    text = A.free_answer(body.question, snap, cfg)
-    return {"answer": text or ("Je réponds à partir des données du moteur. Essayez : « Pourquoi cette équipe ? », « Et si "
-                               "je perds 50 % des équipes ? », « Quels clients sensibles attendent ? », « Où est la "
-                               "saturation ? », « Faut-il des renforts ? »."), "source": "llm" if text else "engine"}
+    return A.answer(body.question, run.ours.snapshots[k], cfg,
+                    plan_explanation=lambda: plan_explanation(crisis, k, True, team_share),
+                    rec_explanation=lambda rec: _explanation(run, k, rec["incidentId"]),
+                    reinforcement=lambda: _reinforcement(run, k),
+                    what_if=lambda share: _what_if(crisis, share),
+                    final_score=run.ours.snapshots[-1]["kpis"]["score"], rec_id=body.recId)
 
 
 # ---------------------------------------------------------------- phase 3: reinforcement

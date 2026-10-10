@@ -1,8 +1,10 @@
 // THE single entry point for crisis data. Swap the implementation here.
 //
 //   VITE_DATA_SOURCE=mock (default) -> mock engine running in the browser on
-//                                      public/mock/<crisis>/scenario.json
-//   VITE_DATA_SOURCE=api            -> FastAPI service at VITE_API_URL (see api/apiSource.ts)
+//                                      public/mock/<crisis>/scenario.json (replay only)
+//   VITE_DATA_SOURCE=api            -> FastAPI service at VITE_API_URL:
+//        live mode (default page)    -> the crisis in real time (live/liveSource.ts)
+//        ?mode=replay                -> "Revoir une crise passée": a past crisis, accelerated (api/apiSource.ts)
 //
 // Every call returns the full, aligned timelines of both strategies so the UI can
 // scrub freely. Decisions are idempotent per (step, incident).
@@ -10,6 +12,7 @@
 
 import type { CrisisMeta, Snapshot } from './contract';
 import { createApiSource } from './api/apiSource';
+import { createLiveSource, type LiveCapabilities } from './live/liveSource';
 import { createMockSource } from './mock/mockSource';
 
 export type Timelines = { ours: Snapshot[]; reference: Snapshot[] };
@@ -92,6 +95,8 @@ export interface CrisisSource {
   listRules?(): Promise<{ crisis: RuleRow[]; permanent: RuleRow[] }>;
   removeRule?(index: number): Promise<Timelines>;
   roads?(pairs: [number, number][][]): Promise<RoadRoute[]>;
+  /** Live mode only: polling and the real clock. */
+  live?: LiveCapabilities;
   learning?: {
     stats(): Promise<{ total: number; accepted?: number; rejected?: number; refusal_rate: number }>;
     candidates(): Promise<Candidate[]>;
@@ -105,9 +110,12 @@ export interface CrisisSource {
 }
 
 const kind = (import.meta.env.VITE_DATA_SOURCE ?? 'mock') as 'mock' | 'api';
-const crisis = (import.meta.env.VITE_CRISIS ?? 'CRISE_027') as string;
+const crisis = (new URLSearchParams(location.search).get('crise') ?? import.meta.env.VITE_CRISIS ?? 'CRISE_027') as string;
+const apiUrl = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000') as string;
+
+/** True when the live mode exists (real engine); the mock only replays. */
+export const liveAvailable = kind === 'api';
+export const mode: 'live' | 'replay' = liveAvailable && new URLSearchParams(location.search).get('mode') !== 'replay' ? 'live' : 'replay';
 
 export const source: CrisisSource =
-  kind === 'api'
-    ? createApiSource(import.meta.env.VITE_API_URL ?? 'http://localhost:8000', crisis)
-    : createMockSource(crisis);
+  mode === 'live' ? createLiveSource(apiUrl) : kind === 'api' ? createApiSource(apiUrl, crisis) : createMockSource(crisis);

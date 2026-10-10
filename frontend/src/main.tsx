@@ -6,6 +6,7 @@ import './styles/tokens.css';
 import './styles/app.css';
 import './styles/shell.css';
 import './styles/pro.css';
+import './styles/live.css';
 import { App } from './App';
 
 if (import.meta.env.DEV) import('./dev/capture');

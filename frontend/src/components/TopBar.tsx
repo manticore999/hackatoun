@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { fmtClock, fmtDay, fmtInt } from '../lib/format';
-import { source } from '../data/source';
+import { liveAvailable, mode, source } from '../data/source';
 import { stepOf, useStore } from '../state/store';
 import { WarningIcon } from './WarningIcon';
 
@@ -155,26 +155,51 @@ const Icon = ({ d }: { d: string }) => (
   </svg>
 );
 
-/** Slim top bar: product, crisis being replayed, engine status. */
+/** Slim top bar: product, which crisis (live or a past one), engine status, switch between the two modes. */
 export function TopBar() {
   const view = useStore((s) => s.view);
-  const crisis = useStore((s) => s.meta!.crisisId);
-  const start = useStore((s) => s.meta!.start);
+  const meta = useStore((s) => s.meta!);
+  const started = useStore((s) => s.timelines!.ours.some((x) => x.incidents.length > 0));
+  const speed = meta.speed ?? 1;
+  const goto = (q: string) => (location.search = q);
   return (
     <header className="topbar">
       <img className="logo" src={`${import.meta.env.BASE_URL}logo-enedispo.png`} alt="EnedisPO" />
       <span className="topbar-sep" aria-hidden />
       <div className="topbar-title">
         <b>Pilotage de crise</b>
-        <span>
-          Rejeu de la crise {crisis.replace('CRISE_', 'n° ')} du {fmtDay(Date.parse(start))} · Ariège, Haute-Garonne, Gers
-        </span>
+        {mode === 'live' ? (
+          <span>
+            {started ? `Crise en cours depuis ${fmtClock(Date.parse(meta.start))}, ${fmtDay(Date.parse(meta.start))}` : 'En veille : aucune alerte pour le moment'}
+            {' '}· Ariège, Haute-Garonne, Gers
+          </span>
+        ) : (
+          <span>
+            Revue de la crise {meta.crisisId.replace('CRISE_', 'n° ')} du {fmtDay(Date.parse(meta.start))} (temps accéléré) · Ariège, Haute-Garonne, Gers
+          </span>
+        )}
       </div>
       <div className="topbar-right">
         {view === 'reference' && <span className="badge">Vue stratégie de référence</span>}
-        <span className="engine-status">
-          <i aria-hidden /> {source.explainPlan ? 'Moteur et IA connectés' : 'Données de démonstration'}
-        </span>
+        {mode === 'live' ? (
+          <span className="live-badge" title={speed > 1 ? `Horloge accélérée ×${speed} pour la démonstration` : 'Horloge réelle'}>
+            <i aria-hidden /> En direct{speed > 1 ? ` · ×${speed}` : ''}
+          </span>
+        ) : (
+          <span className="engine-status">
+            <i aria-hidden /> {source.explainPlan ? 'Moteur et IA connectés' : 'Données de démonstration'}
+          </span>
+        )}
+        {liveAvailable &&
+          (mode === 'live' ? (
+            <button className="pill small" onClick={() => goto('?mode=replay')} title="Rejouer une crise passée en temps accéléré et voir ce qui a été fait">
+              Revoir une crise passée
+            </button>
+          ) : (
+            <button className="pill small primary" onClick={() => goto('')}>
+              Revenir au direct
+            </button>
+          ))}
       </div>
     </header>
   );

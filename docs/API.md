@@ -6,7 +6,24 @@ Interactive docs: http://localhost:8000/docs. CORS is open (hackathon).
 All decisions and numbers come from the engine. The front-end displays them and sends the manager's decisions back.
 Times are **hours since H0** (the first incident); every time also has a `*_clock` field ("28/05 08:18") where useful.
 
-## 1. Start and drive a crisis
+## 0. Live mode: `/live` (the crisis in real time)
+
+The clock is the real one (H0 = when the crisis is opened). The engine only learns about the world through events sent
+by the field (in the demo: `python -m simulator`, a separate process). Nothing is dispatched until the manager validates.
+
+| Call | Body | Returns |
+|---|---|---|
+| `POST /live/reset` | `{"speed": 1, "label": ""}` | opens a new crisis now; `speed` > 1 runs the clock faster (demo) |
+| `GET /live/clock` | – | `start`, `nowHours`, `speed`, `serverTime` |
+| `POST /live/events` | one event or a list: `{"type": "incident_reported", "id", "poste_id", "est_duration_h", "cause"?}` · `{"type": "team_on_site", "team", "incident"}` · `{"type": "repair_done", "team", "incident"}` · `{"type": "team_unavailable", "team", "until_h"?, "reason"?}` | `{ok, at_h}` |
+| `GET /live/dispatches?after=seq` | – | trips started by the manager's validations (`seq, team, incident, depart_at, travel_h, repair_h`): the field plays them and reports back |
+| `GET /live/meta` | – | `CrisisMeta` + `mode: "live"`, `speed`, `roster` (shift groups A/B/C) |
+| `GET /live/state?have=n` | – | `version`, `clock`, the current `snapshot` (front-end contract), `history[n:]`, `historyLength` |
+| `POST /live/plan/accept` | `{"assignments": [{"incidentId", "teamId", "reason"?}], "reason"?}` | `{dispatched}`: free teams leave now, busy ones take the job next |
+| `GET /live/plan/explanation?llm=` · `GET /live/explanation?incident=` · `POST /live/copilot {question, recId?}` | – | as in replay mode, for the plan on screen |
+| `GET /live/reinforcement` · `POST /live/refusals` (+ `/{pid}/confirm`) · `GET`/`POST /live/rules` · `DELETE /live/rules/{i}` | – | as in replay mode |
+
+## 1. Start and drive a crisis (replay of a past crisis)
 
 | Call | Body | Returns |
 |---|---|---|
@@ -91,6 +108,7 @@ Demo data: `python bench/review_refusals.py --simulate CRISE_051 CRISE_046 CRISE
 with refusals from a **simulated** manager (flagged `simulated`).
 
 ## LLM
-Without `OPENROUTER_API_KEY`, texts come from templates and refusal reasons are parsed by rules. Everything works.
-With the key, the OpenRouter model (`nvidia/nemotron-3-super-120b-a12b:free`, Gemma 4 as fallback) writes the expanded details and interprets free-text reasons. Every number
+Without a key (`MISTRAL_API_KEY`, or `OPENROUTER_API_KEY` for the fallback provider, in `.env`), texts come from
+templates and refusal reasons are parsed by rules. Everything works. With a key, the model set in `config/default.yaml`
+(`llm`: Mistral first, OpenRouter free models as fallback) writes the expanded details and interprets free-text reasons. Every number
 it writes is checked against the engine's facts, and every rule it proposes goes through the validator.

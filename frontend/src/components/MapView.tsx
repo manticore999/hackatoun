@@ -408,7 +408,8 @@ export function MapView() {
   );
 
   // ---- a new plan appears: frame all its routes (teams and outages) so the whole proposal is visible
-  const planKey = view === 'ours' && recs.length ? `${k}:${recs.length}` : '';
+  // live: re-frame only when the set of proposed outages changes (not at every re-plan or history entry)
+  const planKey = view === 'ours' && recs.length ? `${meta.mode === 'live' ? '' : k}:${recs.map((r) => r.incidentId).sort().join()}` : '';
   useEffect(() => {
     const map = liveMap.current;
     if (!ready || !map || !planKey) return;
@@ -808,7 +809,7 @@ export function MapView() {
   const userMoved = useRef(false);
 
   // The pinned card follows the map; it is dropped on Esc and when the step changes (its data would be stale).
-  useEffect(() => setPinned(null), [k]);
+  useEffect(() => setPinned(null), [meta.mode === 'live' ? 0 : k]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setPinned(null);
     window.addEventListener('keydown', onKey);

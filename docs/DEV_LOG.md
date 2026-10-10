@@ -27,6 +27,10 @@ objective**. When it fails, the system recommends reinforcement (+N teams from o
 - **3 best paths** per recommendation (recommended team + 2 best alternatives) must be **visible in the UI** (map colours + popup).
 - **Reinforcement count** and the **learning loop** (refusal dialog, past refusals, expert review, rule registry) must be
   **visible in the UI** (popups), not only in the backend.
+- **Live by default** (2026-10-10): the dashboard opens on the crisis in real time (H0 = now, Paris clock). In live
+  mode the backend never simulates the field: it only receives events (`POST /live/events`) from an external system,
+  in the demo the separate `simulator/` process. Nothing is dispatched before the manager validates. The accelerated
+  replay of a past crisis is a secondary view (« Revoir une crise passée », `?mode=replay&crise=`).
 - **Front-end** = teammate's EnedisPO (React/TS/Vite, MapLibre + deck.gl, zustand), copied into **`frontend/`**. We build
   everything in this repo. Its UI conventions: French, colours only from `src/styles/tokens.css`, pills for actions, square data
   containers, borders not shadows, transitions < 200 ms, Outfit for figures / Public Sans for text.
@@ -50,8 +54,10 @@ objective**. When it fails, the system recommends reinforcement (+N teams from o
 ```bash
 # backend (from the repo root)
 python -m uvicorn dispatch.api.app:app --app-dir src --port 8000 --reload --reload-dir src
-# front-end on the real engine
+# front-end on the real engine (opens in live mode)
 cd frontend && VITE_DATA_SOURCE=api VITE_API_URL=http://localhost:8000 npm run dev -- --port 5173 --strictPort
+# the field for the live mode (separate process): alerts of a past crisis from now + team reports; --speed 1 = real time
+python -m simulator --crisis CRISE_027 --speed 60
 # tests (global pytest plugins break without this env var)
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
 ```
@@ -211,6 +217,32 @@ Tests stub the LLM (`tests/conftest.py`). Benchmarks: `bench/run_benchmark.py`, 
       wrapping; long tags in "Changer d'équipe"; Enter validated one line (slow replay) -> validates the plan; plans
       validated in the browser lost after a refusal replay (store.withLocal re-applies them); journal now lists every
       plan validated so far; each page load = fresh demo (reset is instant unless a replay modified the timeline).
+- [x] Live mode + decoupled field simulator + teams panel (2026-10-10, user: "le système doit fonctionner en temps
+      réel, en attente des problèmes ; découpler la génération des alertes du back ; vue 'revoir une crise passée' en
+      accéléré ; l'heure du système = maintenant ; liste des équipes et explication des postes dans le dashboard").
+  - Backend `dispatch/live/service.py` (`LiveCrisis`): H0 = opening time on the real clock, `speed` for demos; the
+    world is known only through field events (incident_reported, team_on_site, repair_done, team_unavailable); a
+    ticker thread (1 s) re-plans once per tick when something changed (bursts of alerts coalesced) or a planned
+    departure / shift change is due; NOTHING is dispatched until the manager validates (`POST /live/plan/accept`);
+    dispatches are published (`GET /live/dispatches`) for the field to play; history snapshots every
+    `live.history_minutes` of crisis time + one after each decision (timeline, journal). `LiveSession` gained
+    `external_field` (no simulated arrivals / completions; `report / arrived / repaired`; a repair that overruns its
+    estimate keeps the team busy until the field says done). Routes in `api/live.py`: same features as the replay
+    (plan / line explanations, copilot, refusal → rule, rules, reinforcement). Config section `live`.
+  - `simulator/` (separate process, HTTP only, `python -m simulator --crisis CRISE_027 --speed 60`): replays a past
+    crisis shifted to now and plays the field teams (on-site / repair-done reports, optional lognormal noise on travel
+    and repair times). Replaces the alert / completion simulation that used to live inside the backend for the UI.
+  - Front-end: `data/live/liveSource.ts` (polls `/live/state` every second, backend clock), `source.ts` picks live
+    (default with the API) or replay (`?mode=replay`, `?crise=`); top-bar switch « Revoir une crise passée » /
+    « Revenir au direct »; live = no playback, no reset, timeline runs to now, « en veille » states while no alert.
+    New **Équipes** tab (`TeamsPanel.tsx`): every team by status (filters) with its shift end / return time and group,
+    and the roster explained for the manager (12 h / 12 h, groups A/B/C on a 48 h band with "now"). Contract:
+    `Team.group / shiftStart / shiftEnd`, `CrisisMeta.mode / speed / roster` (also returned by the replay `meta`).
+  - Copilot question routing shared by both modes (`copilot/answers.answer`, word-based: "150 clients" no longer
+    triggers the 50 % what-if; the reinforcement answer follows the config basis — it said "clients" for incidents).
+  - Removed the Streamlit app (`app/`, `app` extra): the React front-end is the only UI.
+  - Known limits: the live lock is held while a refusal is priced (≤ 1 s re-plan; the LLM translation runs outside
+    it); a team late on its estimated travel sits at the outage on the map until the field reports it on site.
 - [ ] NEXT FEATURE (user idea, not started): accept a whole PLAN instead of route by route — the engine proposes up to 3
       alternative plans (or one when only one is sensible), each with its N×T, 90 %/48 h check and the main differences;
       the manager accepts one plan.

@@ -48,8 +48,9 @@ def _int(n: float) -> str:
     return f"{round(n):,}".replace(",", " ")            # no-break space: "1 912" never wraps (every font has it)
 
 
-def plan_facts(ours: list[dict], reference: list[dict], k: int, start_iso: str) -> dict:
-    """Facts of the plan proposed at step k, in business units (from the front-end snapshots)."""
+def plan_facts(ours: list[dict], reference: list[dict] | None, k: int, start_iso: str) -> dict:
+    """Facts of the plan proposed at step k, in business units (from the front-end snapshots).
+    `reference` = the reference strategy's timeline (replay only): adds the whole-crisis comparison."""
     snap = ours[k]
     teams = {t["id"]: t for t in snap["teams"]}
     incs = {i["id"]: i for i in snap["incidents"]}
@@ -86,10 +87,10 @@ def plan_facts(ours: list[dict], reference: list[dict], k: int, start_iso: str) 
     }
 
     # the whole crisis: average time without power per affected customer, ours vs reference strategy
-    final_o, final_r = ours[-1], reference[-1]
+    final_o, final_r = ours[-1], (reference or [{"kpis": {"score": 0}}])[-1]
     customers = sum(i["clients"] for i in final_o["incidents"]) or 1
     so, sr = final_o["kpis"]["score"], final_r["kpis"]["score"]
-    if sr > 0:
+    if reference and sr > 0:
         facts["crise_entiere"] = {
             "coupure_moyenne_par_client": _dur(so / customers), "coupure_moyenne_reference": _dur(sr / customers),
             "clients_h_evites": _int(sr - so), "gain_pourcent": f"{round(100 * (sr - so) / sr)} %",

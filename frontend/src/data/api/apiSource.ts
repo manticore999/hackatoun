@@ -9,6 +9,41 @@
 import type { CrisisMeta } from '../contract';
 import type { CrisisSource, DecisionInput, Timelines } from '../source';
 
+/** fetch + JSON with the API's error detail; shared by the replay and the live sources. */
+export function http(baseUrl: string) {
+  const base = baseUrl.replace(/\/$/, '');
+  return async function call<T>(path: string, init?: RequestInit): Promise<T> {
+    const r = await fetch(`${base}${path}`, { headers: { 'Content-Type': 'application/json' }, ...init });
+    if (!r.ok) {
+      const detail = await r
+        .json()
+        .then((d) => d.detail)
+        .catch(() => '');
+      throw new Error(detail || `${init?.method ?? 'GET'} ${path} → ${r.status}`);
+    }
+    return r.json() as Promise<T>;
+  };
+}
+
+export const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) });
+
+/** Routes that do not depend on the mode: road geometry and the expert review (learning loop). */
+export function sharedCapabilities(call: ReturnType<typeof http>): Pick<CrisisSource, 'roads' | 'learning'> {
+  return {
+    roads: (pairs) => call('/routes', post({ pairs })),
+    learning: {
+      stats: () => call('/learning/stats'),
+      candidates: () => call('/learning/candidates'),
+      remarks: () => call('/learning/remarks'),
+      backtest: (cand) => call('/learning/candidates/backtest', post({ candidate: cand })),
+      activate: (cand, approvedBy) => call('/learning/registry/activate', post({ candidate: cand, approved_by: approvedBy })),
+      simulate: (crises) => call('/learning/simulate', post({ crises })),
+      registry: () => call('/learning/registry'),
+      retire: (id) => call(`/learning/registry/${encodeURIComponent(id)}/retire`, { method: 'POST' }),
+    },
+  };
+}
+
 /** The engine lists a step's recommendations as computed before the manager's decisions at that step; the contract
  *  (like the mock) lists only those still to decide. Drop the ones whose incident or team was decided. */
 function pendingOnly(t: Timelines): Timelines {
@@ -23,25 +58,13 @@ function pendingOnly(t: Timelines): Timelines {
 }
 
 export function createApiSource(baseUrl: string, crisis: string): CrisisSource {
-  const base = baseUrl.replace(/\/$/, '');
+  const call = http(baseUrl);
   const share = Number(new URLSearchParams(location.search).get('equipes') ?? 100) / 100;
   const shareQ = share > 0 && share < 1 ? `team_share=${share}` : '';
   const withShare = (p: string) => (shareQ ? `${p}${p.includes('?') ? '&' : '?'}${shareQ}` : p);
 
-  async function call<T>(path: string, init?: RequestInit): Promise<T> {
-    const r = await fetch(`${base}${path}`, { headers: { 'Content-Type': 'application/json' }, ...init });
-    if (!r.ok) {
-      const detail = await r
-        .json()
-        .then((d) => d.detail)
-        .catch(() => '');
-      throw new Error(detail || `${init?.method ?? 'GET'} ${path} → ${r.status}`);
-    }
-    return r.json() as Promise<T>;
-  }
   const c = <T>(p: string, init?: RequestInit) => call<T>(withShare(`/crises/${encodeURIComponent(crisis)}${p}`), init);
   const tl = (p: string, init?: RequestInit) => c<Timelines>(p, init).then(pendingOnly);
-  const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) });
   const decide = (d: DecisionInput, kind: 'accepted' | 'overridden') => tl('/decisions', post({ ...d, kind }));
 
   return {
@@ -64,16 +87,6 @@ export function createApiSource(baseUrl: string, crisis: string): CrisisSource {
     applyRules: (step, modifiers) => tl('/rules', post({ step, modifiers })),
     listRules: () => c('/rules'),
     removeRule: (i) => tl(`/rules/${i}`, { method: 'DELETE' }),
-    roads: (pairs) => call('/routes', post({ pairs })),
-    learning: {
-      stats: () => call('/learning/stats'),
-      candidates: () => call('/learning/candidates'),
-      remarks: () => call('/learning/remarks'),
-      backtest: (cand) => call('/learning/candidates/backtest', post({ candidate: cand })),
-      activate: (cand, approvedBy) => call('/learning/registry/activate', post({ candidate: cand, approved_by: approvedBy })),
-      simulate: (crises) => call('/learning/simulate', post({ crises })),
-      registry: () => call('/learning/registry'),
-      retire: (id) => call(`/learning/registry/${encodeURIComponent(id)}/retire`, { method: 'POST' }),
-    },
+    ...sharedCapabilities(call),
   };
 }

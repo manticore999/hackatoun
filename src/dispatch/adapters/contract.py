@@ -26,9 +26,33 @@ def team_label(team, site_name: str) -> str:
 def team_status(s, team, t: float) -> str:
     W, R = s.cfg.roster.work_h, s.cfg.roster.rest_h
     if team.current_job and team.current_job in s.in_progress:
+        if s.external_field:                                            # live: on site only once the team says so
+            return "repairing" if team.current_job in s.on_site else "travelling"
         _, go, arrive, _ = s.in_progress[team.current_job]
         return "travelling" if t < arrive else "repairing"
     return "available" if is_on_duty(team.shift_start, t, W, R) else "resting"
+
+
+def roster_group(cfg, team) -> str:
+    """Shift group of a team: A starts at H0, B at H0 + b_offset_h, C (the relief) at H0 + c_offset_h."""
+    r = cfg.roster
+    if abs(team.shift_start - r.b_offset_h) < 1e-9 and team.shift_start:
+        return "B"
+    if abs(team.shift_start - getattr(r, "c_offset_h", -1)) < 1e-9 and team.shift_start:
+        return "C"
+    return "A"
+
+
+def roster(s) -> dict:
+    """The fixed shift schedule, for the manager: work_h on / rest_h off, three groups staggered from H0."""
+    r = s.cfg.roster
+    offsets = {"A": 0.0, "B": float(r.b_offset_h), "C": float(getattr(r, "c_offset_h", 12.0))}
+    counts = {g: 0 for g in offsets}
+    for team in s.teams:
+        counts[roster_group(s.cfg, team)] += 1
+    return {"workHours": r.work_h, "restHours": r.rest_h,
+            "groups": [{"id": g, "offsetHours": off, "firstShiftStart": iso(s.t0, off), "teams": counts[g]}
+                       for g, off in offsets.items() if counts[g]]}
 
 
 def shift_hours_left(s, team, t: float) -> float:
@@ -66,7 +90,8 @@ def snapshot(s, t: float, time_iso: str, recs: list[dict], decisions: list[dict]
             statuses[i.id] = "restored"
         elif i.id in s.in_progress:
             tid, go, arrive, C = s.in_progress[i.id]
-            statuses[i.id] = "enroute" if t < arrive else "repairing"
+            on_site = i.id in s.on_site if s.external_field else t >= arrive
+            statuses[i.id] = "repairing" if on_site else "enroute"
             team_of[i.id] = tid
         else:
             statuses[i.id] = "waiting"
@@ -75,9 +100,12 @@ def snapshot(s, t: float, time_iso: str, recs: list[dict], decisions: list[dict]
         st = team_status(s, team, t)
         avail["available" if st == "available" else "resting" if st == "resting" else "busy"] += 1
         lat, lon = s.position(team, t)
+        W, R = s.cfg.roster.work_h, s.cfg.roster.rest_h
+        sh_s, sh_e = window(team.shift_start, t, W, R)                # current shift, or the next one when resting
         teams.append({"id": team.id, "label": team_label(team, site_names[team.home_site]),
                       "siteName": site_names[team.home_site], "lon": lon, "lat": lat, "status": st,
-                      "shiftHoursLeft": shift_hours_left(s, team, t),
+                      "shiftHoursLeft": shift_hours_left(s, team, t), "group": roster_group(s.cfg, team),
+                      "shiftStart": iso(s.t0, sh_s), "shiftEnd": iso(s.t0, sh_e),
                       **({"incidentId": team.current_job} if team.current_job else {})})
     cut_now = sum(i.customers for i in known if statuses[i.id] != "restored")
     restored = sum(i.customers for i in known if statuses[i.id] == "restored")

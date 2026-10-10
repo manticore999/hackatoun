@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { CrisisMeta, Decision, Recommendation, Snapshot, StrategyId } from '../data/contract';
-import { source, type DecisionInput, type Timelines } from '../data/source';
+import { mode, source, type DecisionInput, type Timelines } from '../data/source';
 import { fmtDelta, fmtInt } from '../lib/format';
 
 export type Toast = { id: number; tone: 'ok' | 'info' | 'warn'; title: string; body?: string };
@@ -156,6 +156,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async init() {
+    if (source.live) return initLive();
     try {
       // Every page load is a fresh demo: the server forgets earlier decisions and crisis rules (instant when clean).
       const [meta, timelines] = await Promise.all([source.loadMeta(), source.acceptPlan ? source.reset() : source.loadTimelines()]);
@@ -169,13 +170,15 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setT(t) {
+    if (source.live) return; // live: the clock is the real one
     set({ t: Math.max(0, Math.min(endMinutes(get()), t)) });
   },
   needsDecision() {
     const s = get();
-    return !!source.acceptPlan && s.view === 'ours' && currentRecs(s).length > 0;
+    return !source.live && !!source.acceptPlan && s.view === 'ours' && currentRecs(s).length > 0;
   },
   play() {
+    if (source.live) return;
     const s = get();
     // The manager decides before the crisis goes on: a waiting plan must be validated or refused first.
     if (s.needsDecision()) {
@@ -187,6 +190,7 @@ export const useStore = create<State>((set, get) => ({
     set({ playing: true, overrideRecId: undefined, previewTeamId: undefined });
   },
   pause() {
+    if (source.live) return;
     const s = get();
     const step = s.meta?.stepMinutes ?? 30;
     // Snap to the step so the recommendations on screen match the clock.
@@ -197,6 +201,7 @@ export const useStore = create<State>((set, get) => ({
     else get().play();
   },
   stepBy(n) {
+    if (source.live) return;
     const s = get();
     const step = s.meta?.stepMinutes ?? 30;
     const k = Math.floor(s.t / step + 1e-6) + n;
@@ -278,6 +283,23 @@ export const useStore = create<State>((set, get) => ({
     const recs = currentRecs(s);
     if (!recs.length) return;
     const k = stepOf(s);
+    if (source.live) {
+      // Live: the backend dispatches the teams now; the field reports their arrival and the end of the repairs.
+      set({ busy: true });
+      try {
+        const timelines = await source.acceptPlan(k);
+        set({ timelines, hoveredRecId: undefined, overrideRecId: undefined, focusedRecId: undefined });
+        const clients = recs.reduce((a, r) => a + r.factors.clients, 0);
+        get().toast({
+          tone: 'ok',
+          title: `Plan validé : ${recs.length} équipe${recs.length > 1 ? 's' : ''} en route`,
+          body: `${fmtInt(clients)} clients concernés. Le moteur proposera le prochain plan dès qu’une alerte arrive ou qu’une équipe se libère.`,
+        });
+      } finally {
+        set({ busy: false });
+      }
+      return;
+    }
     // The engine's own plan is what the precomputed crisis already assumes: validating it changes nothing in the
     // projection, so it is applied here at once (no server recomputation) and only recorded on the server.
     acceptedLocal[k] = [
@@ -330,11 +352,13 @@ export const useStore = create<State>((set, get) => ({
 
 export function endMinutes(s: Pick<State, 'timelines' | 'meta'>): number {
   if (!s.timelines || !s.meta) return 0;
+  if (s.meta.mode === 'live') return Math.max(0, (Date.parse(s.timelines.ours[s.timelines.ours.length - 1].time) - Date.parse(s.meta.start)) / 60000);
   return (s.timelines.ours.length - 1) * s.meta.stepMinutes;
 }
 
 export const stepOf = (s: Pick<State, 't' | 'meta' | 'timelines'>) => {
   if (!s.meta || !s.timelines) return 0;
+  if (s.meta.mode === 'live') return Math.max(0, s.timelines.ours.length - 1); // live: always the current state
   return Math.min(s.timelines.ours.length - 1, Math.floor(s.t / s.meta.stepMinutes + 1e-6));
 };
 
@@ -384,5 +408,44 @@ function teamLabel(s: State, id: string) {
 function incidentName(s: State, id: string) {
   return s.timelines?.ours[stepOf(s)].incidents.find((i) => i.id === id)?.commune ?? id;
 }
+
+/** Live mode: load the crisis, then poll the backend every second (alerts, field reports, new plans). */
+async function initLive() {
+  const live = source.live!;
+  const load = async () => {
+    const [meta, timelines] = await Promise.all([source.loadMeta(), source.loadTimelines()]);
+    useStore.setState({ meta, timelines, status: 'ready', t: live.nowMinutes() });
+    useStore.getState().refreshRules();
+  };
+  try {
+    await load();
+  } catch (e) {
+    useStore.setState({ status: 'error', error: e instanceof Error ? e.message : String(e) });
+    return;
+  }
+  let polling = false;
+  setInterval(async () => {
+    const s = useStore.getState();
+    if (polling || s.busy) return;
+    polling = true;
+    try {
+      const { timelines, restarted } = await live.poll();
+      if (restarted) {
+        useStore.setState({ meta: await source.loadMeta(), focusedRecId: undefined });
+        useStore.getState().toast({ tone: 'info', title: 'Nouvelle crise ouverte', body: 'Le terrain a ouvert une nouvelle crise : le tableau de bord repart de zéro.' });
+      }
+      const idx = currentRecs(useStore.getState()).findIndex((r) => r.id === focusedRec(useStore.getState())?.id);
+      useStore.setState({ timelines, t: live.nowMinutes(), status: 'ready' });
+      keepFocusAt(idx);
+    } catch {
+      /* backend restarting: keep the last state, try again */
+    } finally {
+      polling = false;
+    }
+  }, 1000);
+}
+
+/** The display mode of this page (live = real time, replay = a past crisis). */
+export const pageMode = mode;
 
 if (import.meta.env.DEV) (window as unknown as { __store?: unknown }).__store = useStore;

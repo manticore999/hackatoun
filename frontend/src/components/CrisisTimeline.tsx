@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { Snapshot } from '../data/contract';
 import { fmtHour, fmtInt, fmtMinutes, parisHour } from '../lib/format';
+import { mode } from '../data/source';
 import { SPEEDS, endMinutes, stepOf, useStore } from '../state/store';
 import { useSize } from './useWidth';
 
@@ -41,15 +42,17 @@ type Series = {
   restoredAt: Map<string, number>; // incident -> minutes of first snapshot showing it restored
 };
 
-function buildSeries(snaps: Snapshot[], start: number, step: number): Series {
+function buildSeries(snaps: Snapshot[], start: number): Series {
   const n = snaps.length;
-  const minutes = snaps.map((_, i) => i * step);
+  // Snapshots are placed by their own time: regular steps in a replay, irregular in live mode (one every few minutes
+  // plus one after each decision).
+  const minutes = snaps.map((x) => (Date.parse(x.time) - start) / 60000);
   const reportedMin = (iso: string) => (Date.parse(iso) - start) / 60000;
   const all = snaps[n - 1].incidents;
-  const firstMin = Math.min(...all.map((i) => reportedMin(i.reportedAt)));
+  const firstMin = all.length ? Math.min(...all.map((i) => reportedMin(i.reportedAt))) : 0;
   const arrivals = new Array(n).fill(0);
-  for (const i of all) arrivals[Math.min(n - 1, Math.ceil(reportedMin(i.reportedAt) / step))]++;
-  const lastReport = Math.max(...all.map((i) => reportedMin(i.reportedAt)));
+  for (const i of all) arrivals[nearestIdx(minutes, reportedMin(i.reportedAt), true)]++;
+  const lastReport = all.length ? Math.max(...all.map((i) => reportedMin(i.reportedAt))) : 0;
   let endIdx = n - 1;
   for (let i = 0; i < n; i++)
     if (minutes[i] >= lastReport && snaps[i].kpis.clientsCut === 0) {
@@ -78,6 +81,19 @@ function buildSeries(snaps: Snapshot[], start: number, step: number): Series {
     peakIdx,
     restoredAt,
   };
+}
+
+/** Index of the snapshot at minute m (the first at or after it when `ceil`, else the closest). */
+function nearestIdx(minutes: number[], m: number, ceil = false): number {
+  let lo = 0;
+  let hi = minutes.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (minutes[mid] < m) lo = mid + 1;
+    else hi = mid;
+  }
+  if (!ceil && lo > 0 && Math.abs(minutes[lo - 1] - m) < Math.abs(minutes[lo] - m)) return lo - 1;
+  return lo;
 }
 
 /** When the plan repairs `share` of the incidents reported so far (minutes since start), or null.
@@ -134,12 +150,13 @@ export function CrisisTimeline() {
   const step = meta.stepMinutes;
   const start = Date.parse(meta.start);
   const snaps = timelines.ours;
-  const s = useMemo(() => buildSeries(snaps, start, step), [snaps, start, step]);
+  const s = useMemo(() => buildSeries(snaps, start), [snaps, start]);
   const snapNow = snaps[k];
 
   // ---- geometry
   const x0 = Math.floor(s.firstMin / step) * step; // axis starts at the first incident's step
-  const x1 = Math.min(lastMin, s.endMin + step * 2);
+  // live: the axis runs to now (at least one hour wide); replay: to the end of the crisis
+  const x1 = mode === 'live' ? Math.max(x0 + 60, t) : Math.min(lastMin, s.endMin + step * 2);
   const W = Math.max(0, width - g.left - g.right);
   const mainTop = g.flags;
   const mainH = Math.max(40, height - g.flags - g.gap - g.arrivals - g.gap - g.capacity - g.axis - 4);
@@ -185,16 +202,18 @@ export function CrisisTimeline() {
   const peak = s.cut[s.peakIdx];
   const peakMin = s.minutes[s.peakIdx];
 
+  // Live: the axis ends now; milestones beyond it (48 h target, projected 90 %) are not drawn.
+  const onAxis = (min: number) => mode !== 'live' || min <= x1 + 1e-6;
   // Priority order: the target and the 90 % milestone first, the 50 % milestone dropped first when crowded.
   const flags = placeFlags(
     [
-      { id: 'target', x: X(targetMin), y: mainBottom, label: 'Objectif 48 h', projected: targetMin > t },
-      ...(m90 !== null
+      ...(onAxis(targetMin) ? [{ id: 'target', x: X(targetMin), y: mainBottom, label: 'Objectif 48 h', projected: targetMin > t }] : []),
+      ...(m90 !== null && onAxis(m90)
         ? [{ id: 'm90', x: X(m90), y: Y(cutAt(s, m90)), label: '90 % des incidents réparés', projected: m90 > t, tone: late ? ('critical' as const) : undefined }]
         : []),
       { id: 'peak', x: X(peakMin), y: Y(peak), label: `Pic : ${fmtInt(peak)} clients coupés`, projected: peakMin > t },
-      { id: 'end', x: X(s.endMin), y: mainBottom, label: 'Fin de crise', projected: s.endMin > t },
-      ...(m50 !== null ? [{ id: 'm50', x: X(m50), y: Y(cutAt(s, m50)), label: '50 % réparés', projected: m50 > t }] : []),
+      ...(mode !== 'live' || snapNow.kpis.clientsCut === 0 ? [{ id: 'end', x: X(s.endMin), y: mainBottom, label: 'Fin de crise', projected: s.endMin > t }] : []),
+      ...(m50 !== null && onAxis(m50) ? [{ id: 'm50', x: X(m50), y: Y(cutAt(s, m50)), label: '50 % réparés', projected: m50 > t }] : []),
     ],
     2,
     width - 2,
@@ -216,7 +235,9 @@ export function CrisisTimeline() {
   const over = t >= s.endMin;
   const peakPast = peakMin <= t;
   const summary = [
-    `Pic ${peakPast ? 'atteint' : 'prévu'} ${whenLabel(start + peakMin * 60000)} avec ${fmtInt(peak)} clients coupés.`,
+    mode === 'live'
+      ? `Pic jusqu’ici : ${fmtInt(peak)} clients coupés (${fmtHour(start + peakMin * 60000)}).`
+      : `Pic ${peakPast ? 'atteint' : 'prévu'} ${whenLabel(start + peakMin * 60000)} avec ${fmtInt(peak)} clients coupés.`,
     m90 === null
       ? '90 % des incidents réparés : estimation en cours.'
       : `90 % des incidents réparés ${m90 <= t ? '' : 'prévus '}${whenLabel(start + m90 * 60000)}, soit ${gapWords(Math.ceil(m90 / 60))}.`,
@@ -228,13 +249,25 @@ export function CrisisTimeline() {
     return x0 + ((clientX - r.left - g.left) / W) * (x1 - x0);
   };
   const hoverMin = hoverX === null ? null : x0 + ((hoverX - g.left) / W) * (x1 - x0);
-  const hoverIdx = hoverMin === null ? null : Math.max(0, Math.min(snaps.length - 1, Math.round(hoverMin / step)));
+  const hoverIdx = hoverMin === null ? null : nearestIdx(s.minutes, hoverMin);
   const cursorLabel = `${fmtHour(start + cursorMin * 60000)} · ${fmtInt(snapNow.kpis.clientsCut)} clients coupés`;
   const cursorLabelW = cursorLabel.length * FLAG_FONT * 0.56 + 12;
   const cursorLeft = cx + 8 + cursorLabelW > width - g.right;
 
+  const waitingForAlerts = !snaps[snaps.length - 1].incidents.length;
   return (
     <footer className="band">
+      {mode === 'live' ? (
+        <div className="transport live" role="status">
+          <span className="live-badge">
+            <i aria-hidden /> En direct
+          </span>
+          <p className="elapsed">
+            {waitingForAlerts ? 'En veille : le moteur attend les alertes du terrain.' : `Crise en cours depuis ${fmtMinutes(elapsed)}`}
+          </p>
+          <p className="elapsed muted">Temps réel : pas de lecture ni de retour arrière. Pour rejouer, « Revoir une crise passée ».</p>
+        </div>
+      ) : (
       <div className="transport" role="group" aria-label="Lecture de la crise">
         <div className="transport-row">
           <button className="round-btn" onClick={() => stepBy(-1)} aria-label="Reculer de 30 min" title="Reculer de 30 min (←)">
@@ -259,11 +292,12 @@ export function CrisisTimeline() {
         </div>
         <p className="elapsed">{over ? `Crise terminée en ${fmtMinutes(s.endMin - s.firstMin)}` : `Crise en cours depuis ${fmtMinutes(elapsed)}`}</p>
       </div>
+      )}
 
       <div className="timeline">
-        <p className="timeline-summary">{summary}</p>
+        <p className="timeline-summary">{waitingForAlerts ? 'Aucune panne signalée pour le moment.' : summary}</p>
         <div className="timeline-chart" ref={ref}>
-          {width > 0 && (
+          {width > 0 && !waitingForAlerts && idx.length > 0 && (
             <svg
               width={width}
               height={height}
@@ -321,7 +355,7 @@ export function CrisisTimeline() {
               <path className="tl-line future" d={area.line} clipPath="url(#tl-future)" />
 
               {/* 48 h target line */}
-              <line className="tl-target" x1={X(targetMin)} x2={X(targetMin)} y1={mainTop - 4} y2={capTop + g.capacity} />
+              {onAxis(targetMin) && <line className="tl-target" x1={X(targetMin)} x2={X(targetMin)} y1={mainTop - 4} y2={capTop + g.capacity} />}
 
               {/* new incidents */}
               <text className="tl-strip-label incidents" x={g.left - 8} y={arrTop + g.arrivals - 2}>
@@ -416,9 +450,10 @@ export function CrisisTimeline() {
   );
 }
 
-/** Customers cut at a given minute (linear between steps). */
+/** Customers cut at a given minute (linear between snapshots). */
 function cutAt(s: Series, min: number) {
-  const i = Math.min(s.minutes.length - 2, Math.max(0, Math.floor(min / (s.minutes[1] || 30))));
+  if (s.minutes.length < 2) return s.cut[0] ?? 0;
+  const i = Math.min(s.minutes.length - 2, Math.max(0, nearestIdx(s.minutes, min, true) - 1));
   const f = (min - s.minutes[i]) / ((s.minutes[i + 1] - s.minutes[i]) || 1);
   return s.cut[i] + (s.cut[i + 1] - s.cut[i]) * Math.max(0, Math.min(1, f));
 }

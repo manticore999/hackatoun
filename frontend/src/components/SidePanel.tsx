@@ -1,12 +1,14 @@
-// Right column: one panel, three tabs. "Plan" = what the engine proposes now (validated as a whole),
-// "Copilote" = questions in plain French, "Journal" = the decisions already taken.
+// Right column: one panel, four tabs. "Plan" = what the engine proposes now (validated as a whole),
+// "Équipes" = every team, what it does and its shift, "Copilote" = questions in plain French,
+// "Journal" = the decisions already taken.
 // The copilot stays mounted while hidden so the conversation survives a tab switch.
 import { useState } from 'react';
 import { Copilot } from './Copilot';
 import { Journal, RecPanel } from './RecPanel';
-import { useOursSnapshot, useStore } from '../state/store';
+import { TeamsPanel } from './TeamsPanel';
+import { stepOf, useOursSnapshot, useStore } from '../state/store';
 
-type Tab = 'plan' | 'copilot' | 'journal';
+type Tab = 'plan' | 'teams' | 'copilot' | 'journal';
 
 export function SidePanel() {
   const snap = useOursSnapshot()!;
@@ -22,7 +24,8 @@ export function SidePanel() {
     }
   };
   const nPlan = snap.recommendations.length;
-  const nDone = useStore((s) => s.timelines!.ours.slice(0, Math.round(s.t / (s.meta?.stepMinutes ?? 30)) + 1).reduce((a, p) => a + p.decisions.length, 0));
+  const nFree = snap.teams.filter((t) => t.status === 'available').length;
+  const nDone = useStore((s) => s.timelines!.ours.slice(0, stepOf(s) + 1).reduce((a, p) => a + p.decisions.length, 0));
 
   return (
     <aside className="side panel">
@@ -30,6 +33,10 @@ export function SidePanel() {
         <button role="tab" aria-selected={active === 'plan'} className={active === 'plan' ? 'on' : ''} onClick={() => go('plan')}>
           Plan
           {nPlan > 0 && <span className="count live">{nPlan}</span>}
+        </button>
+        <button role="tab" aria-selected={active === 'teams'} className={active === 'teams' ? 'on' : ''} onClick={() => go('teams')}>
+          Équipes
+          <span className="count" title="équipes disponibles">{nFree}</span>
         </button>
         <button role="tab" aria-selected={active === 'copilot'} className={active === 'copilot' ? 'on' : ''} onClick={() => go('copilot')}>
           Copilote
@@ -41,6 +48,7 @@ export function SidePanel() {
       </div>
       <div className="panel-body" role="tabpanel">
         {active === 'plan' && <RecPanel />}
+        {active === 'teams' && <TeamsPanel />}
         {active === 'journal' && <Journal snap={snap} />}
         <div className="panel-copilot" hidden={active !== 'copilot'}>
           <Copilot />

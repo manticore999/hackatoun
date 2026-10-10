@@ -30,7 +30,12 @@ Everything goes through **`src/data/source.ts`** (`CrisisSource` interface). Not
 | `VITE_DATA_SOURCE` | Implementation | |
 |---|---|---|
 | `mock` (default) | `src/data/mock/mockSource.ts` | Loads `public/mock/crise_027/scenario.json` and runs the naive engine `src/data/mock/engine.ts` in the browser. Decisions trigger a re-simulation. |
-| `api` | `src/data/api/apiSource.ts` | Calls the FastAPI service at `VITE_API_URL` (default `http://localhost:8000`). |
+| `api` (default page: **live**) | `src/data/live/liveSource.ts` | The crisis in real time: polls `/live/state` every second, the clock is the backend's (= now). Alerts and team reports come from the separate field simulator (`python -m simulator`, repo root). |
+| `api` + `?mode=replay` | `src/data/api/apiSource.ts` | « Revoir une crise passée »: the FastAPI service at `VITE_API_URL` (default `http://localhost:8000`) replays a past crisis (`?crise=CRISE_051`) in accelerated time. |
+
+The right panel has four tabs: **Plan** (the proposal to validate), **Équipes** (every team by status with its shift
+end / return time and group, plus the roster explained: 12 h on / 12 h off, groups A/B/C on a 48 h band), **Copilote**
+and **Journal**. In live mode there is no playback and no reset: the field decides what happens next.
 
 To plug in the real engine:
 
@@ -80,10 +85,11 @@ src/
   data/contract.ts        engine ↔ UI types
   data/source.ts          swap point (mock | api)
   data/mock/              mock engine + mock source
-  data/api/               FastAPI client (ready, not tested against a service)
+  data/api/               FastAPI client, replay of a past crisis (+ shared helpers: roads, learning loop)
+  data/live/              live source: real time, polling /live/state
   state/store.ts          global state (zustand): clock, view, decisions, toasts
   state/clock.ts          playback loop + keyboard shortcuts
-  components/             TopBar, MapView (deck.gl + SVG lines), RecPanel/RecCard/OverridePanel,
+  components/             TopBar (mode switch), MapView (deck.gl + SVG lines), RecPanel/RecCard/OverridePanel, TeamsPanel,
                           Copilot, Timeline, ComparisonChart
   copilot/                explanations and stubbed answers
   styles/tokens.css       ALL the colours and fonts (sampled from the Enedis website)
